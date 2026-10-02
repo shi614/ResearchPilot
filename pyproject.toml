@@ -32,5 +32,6 @@ pythonpath = ["backend"]
 
 [dependency-groups]
 dev = [
+    "pyflakes>=4.0.1",
     "pytest>=9.1.1",
 ]

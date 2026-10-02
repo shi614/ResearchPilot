@@ -19,6 +19,7 @@ data/uploads/*
 data/chroma/*
 data/*.db
 data/*.sqlite*
+data/*.db-*
 reports/*
 !data/uploads/.gitkeep
 !data/chroma/.gitkeep

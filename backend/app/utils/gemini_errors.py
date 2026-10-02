@@ -50,9 +50,20 @@ def gemini_retry_after(exc: Exception) -> float | None:
     return None
 
 
+def is_daily_quota_error(exc: BaseException) -> bool:
+    """True when a 429 refers to a per-day quota (retrying minutes later won't help)."""
+    return gemini_status_code(exc) == 429 and any("PerDay" in str(e) for e in _cause_chain(exc))
+
+
 def to_service_error(exc: Exception, operation: str) -> ExternalServiceError:
     """Map any Gemini failure to an application error with a helpful message."""
     code = gemini_status_code(exc)
+    if code == 429 and is_daily_quota_error(exc):
+        return RateLimitError(
+            "Gemini",
+            f"{operation} failed: the free-tier DAILY quota for this model is exhausted. "
+            "The run is saved; resume it after the quota resets.",
+        )
     if code == 429:
         return RateLimitError(
             "Gemini",

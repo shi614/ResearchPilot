@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     tavily_api_key: SecretStr | None = None
 
     # --- Gemini (free-tier Flash by default) ---
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.5-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     max_research_tool_rounds: int = Field(default=2, ge=1, le=5)
     tavily_max_results: int = Field(default=5, ge=1, le=20)
     tavily_search_depth: Literal["basic", "advanced"] = "basic"  # basic = 1 credit/search
+    max_web_searches: int = Field(default=6, ge=1, le=20)  # per research iteration
+    max_research_iterations: int = Field(default=2, ge=1, le=5)  # "Modify research" limit
+    llm_timeout_seconds: int = Field(default=120, ge=10, le=600)
     rag_top_k: int = Field(default=4, ge=1, le=20)
 
     # --- Knowledge base / RAG ---
@@ -58,6 +61,7 @@ class Settings(BaseSettings):
 
     # --- Storage ---
     database_url: str = f"{SQLITE_PREFIX}data/researchpilot.db"
+    checkpoint_db: Path = Path("data/checkpoints.db")  # LangGraph run state (resumable)
     chroma_dir: Path = Path("data/chroma")
     upload_dir: Path = Path("data/uploads")
     reports_dir: Path = Path("reports")
@@ -84,7 +88,7 @@ class Settings(BaseSettings):
             raise ValueError("model name must not be empty")
         return value.removeprefix("models/")
 
-    @field_validator("chroma_dir", "upload_dir", "reports_dir")
+    @field_validator("checkpoint_db", "chroma_dir", "upload_dir", "reports_dir")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else (PROJECT_ROOT / value).resolve()
@@ -121,7 +125,7 @@ class Settings(BaseSettings):
 
     def ensure_directories(self) -> None:
         """Create runtime data directories if they do not exist."""
-        for directory in (self.chroma_dir, self.upload_dir, self.reports_dir):
+        for directory in (self.chroma_dir, self.upload_dir, self.reports_dir, self.checkpoint_db.parent):
             directory.mkdir(parents=True, exist_ok=True)
         if self.is_sqlite and ":memory:" not in self.database_url:
             Path(self.database_url.removeprefix(SQLITE_PREFIX)).parent.mkdir(

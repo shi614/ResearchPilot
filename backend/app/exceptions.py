@@ -53,3 +53,13 @@ class RateLimitError(ExternalServiceError):
     """An external API rejected the request due to rate limits or exhausted quota."""
 
     status_code = 429
+
+
+class MalformedResponseError(ExternalServiceError):
+    """The LLM returned output that could not be parsed into the expected schema."""
+
+
+class WorkflowError(ResearchPilotError):
+    """A research run cannot be started/resumed in its current state."""
+
+    status_code = 409

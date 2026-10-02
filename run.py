@@ -1,7 +1,8 @@
 """ResearchPilot launcher.
 
 Usage:
-    python run.py backend      # FastAPI on API_HOST:API_PORT (default 127.0.0.1:8000)
+    python run.py backend [--reload]          # FastAPI on API_HOST:API_PORT (default 127.0.0.1:8000)
+    python run.py research "question" [...]   # run the multi-agent workflow in the terminal
 """
 
 from __future__ import annotations
@@ -12,12 +13,12 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = PROJECT_ROOT / "backend"
+sys.path.insert(0, str(BACKEND_DIR))
 
 
 def run_backend(reload: bool) -> None:
     import uvicorn
 
-    sys.path.insert(0, str(BACKEND_DIR))
     from app.config import get_settings
 
     settings = get_settings()
@@ -32,8 +33,14 @@ def run_backend(reload: bool) -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "research":
+        from app.cli import main as research_cli
+
+        research_cli(sys.argv[2:])
+        return
+
     parser = argparse.ArgumentParser(description="Run ResearchPilot services.")
-    parser.add_argument("service", choices=["backend"], help="Service to start")
+    parser.add_argument("service", choices=["backend", "research"], help="Service to start")
     parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes")
     args = parser.parse_args()
     if args.service == "backend":
