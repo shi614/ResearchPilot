@@ -38,12 +38,13 @@ class ResearchRepository:
             raise NotFoundError(f"Research session '{session_id}' not found")
         return record
 
-    def list_recent(self, limit: int = 50) -> list[ResearchSession]:
-        stmt = (
-            select(ResearchSession)
-            .order_by(ResearchSession.created_at.desc(), ResearchSession.id)
-            .limit(limit)
-        )
+    def list_recent(
+        self, limit: int = 50, statuses: set[SessionStatus] | None = None
+    ) -> list[ResearchSession]:
+        stmt = select(ResearchSession)
+        if statuses:
+            stmt = stmt.where(ResearchSession.status.in_(statuses))
+        stmt = stmt.order_by(ResearchSession.created_at.desc(), ResearchSession.id).limit(limit)
         return list(self._session.scalars(stmt))
 
     def update_status(

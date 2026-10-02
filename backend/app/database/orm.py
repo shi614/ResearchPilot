@@ -29,6 +29,11 @@ class SessionStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     QUOTA_EXHAUSTED = "quota_exhausted"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"  # stopped mid-workflow (e.g. backend restart); retryable
+
+
+RETRYABLE_STATUSES = {SessionStatus.FAILED, SessionStatus.QUOTA_EXHAUSTED, SessionStatus.INTERRUPTED}
 
 
 class EventStatus(str, enum.Enum):

@@ -12,8 +12,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.database.orm import DocumentStatus
-from app.models.domain import RetrievedChunk
+from app.database.orm import DocumentStatus, EventStatus, SessionStatus
+from app.models.agent_outputs import ResearchReport
+from app.models.domain import Citation, RetrievedChunk
 
 
 class HealthResponse(BaseModel):
@@ -70,6 +71,66 @@ class KnowledgeSearchRequest(BaseModel):
 class KnowledgeSearchResponse(BaseModel):
     query: str
     results: list[RetrievedChunk]
+
+
+class StartResearchRequest(BaseModel):
+    query: str = Field(min_length=3, max_length=2000, description="Research topic or question")
+    instructions: str | None = Field(default=None, max_length=2000, description="Optional guidance")
+
+
+class ResearchEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    node: str
+    status: EventStatus
+    message: str | None = None
+    created_at: datetime
+
+
+class ResearchStats(BaseModel):
+    llm_calls: int = 0
+    web_searches: int = 0
+    web_sources: int = 0
+    knowledge_base_sources: int = 0
+    evidence: int = 0
+    evidence_web: int = 0
+    evidence_knowledge_base: int = 0
+    iteration: int = 0
+    revisions: int = 0
+
+
+class ResearchSummary(BaseModel):
+    id: str
+    query: str
+    status: SessionStatus
+    title: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    has_report: bool = False
+
+
+class ResearchSessionResponse(ResearchSummary):
+    instructions: str | None = None
+    error: str | None = None
+    retryable: bool = False
+    pending_nodes: list[str] = Field(default_factory=list)
+    approval_request: dict | None = Field(
+        default=None, description="Present while status is awaiting_approval"
+    )
+    errors: list[str] = Field(default_factory=list, description="Non-fatal agent errors")
+    stats: ResearchStats | None = None
+    events: list[ResearchEventResponse] = Field(default_factory=list)
+
+
+class ReportResponse(BaseModel):
+    session_id: str
+    title: str
+    markdown: str
+    report: ResearchReport
+    citations: list[Citation]
+    quality_notes: list[str]
+    created_at: datetime
 
 
 class ErrorResponse(BaseModel):

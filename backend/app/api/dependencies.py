@@ -8,6 +8,7 @@ from app.config import Settings
 from app.database import Database
 from app.services.knowledge_service import KnowledgeService
 from app.services.model_check import ModelCheckService
+from app.services.research_service import ResearchService
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -24,3 +25,7 @@ def get_model_check_service(request: Request) -> ModelCheckService:
 
 def get_knowledge_service(request: Request) -> KnowledgeService:
     return request.app.state.knowledge
+
+
+def get_research_service(request: Request) -> ResearchService:
+    return request.app.state.research

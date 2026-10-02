@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from langchain_core.embeddings import Embeddings
 
 from app import __version__
-from app.api import routes_health, routes_knowledge
+from app.api import routes_health, routes_knowledge, routes_research
 from app.config import Settings, get_settings
 from app.database import Database
 from app.exceptions import ConfigurationError, ResearchPilotError
@@ -19,6 +19,8 @@ from app.rag.embeddings import create_embeddings
 from app.rag.vectorstore import KnowledgeBaseStore
 from app.services.knowledge_service import KnowledgeService
 from app.services.model_check import ModelCheckService
+from app.services.research_factory import create_research_engine
+from app.services.research_service import ResearchService, RunnerFactory
 
 logger = logging.getLogger("researchpilot")
 
@@ -31,10 +33,16 @@ def _default_embeddings(settings: Settings) -> Embeddings | None:
         return None
 
 
+def _default_runner_factory(settings: Settings, knowledge: KnowledgeService) -> RunnerFactory:
+    """Real engine (Gemini + Tavily + SQLite checkpoints), built lazily on first research request."""
+    return lambda on_update: create_research_engine(settings, knowledge, on_update=on_update).runner
+
+
 def create_app(
     settings: Settings | None = None,
     *,
     embeddings_factory: Callable[[Settings], Embeddings | None] = _default_embeddings,
+    runner_factory: Callable[[Settings, KnowledgeService], RunnerFactory] = _default_runner_factory,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -52,10 +60,14 @@ def create_app(
         )
         store = KnowledgeBaseStore(settings.chroma_dir, embeddings_factory(settings))
         app.state.knowledge = KnowledgeService(settings, database, store)
+        research = ResearchService(settings, database, runner_factory(settings, app.state.knowledge))
+        research.recover_interrupted()
+        app.state.research = research
         if missing := settings.missing_required_keys():
             logger.warning("Missing API keys: %s — research features are disabled.", ", ".join(missing))
         logger.info("ResearchPilot backend v%s started (model: %s)", __version__, settings.gemini_model)
         yield
+        research.shutdown()
         database.dispose()
 
     app = FastAPI(
@@ -82,6 +94,7 @@ def create_app(
 
     app.include_router(routes_health.router)
     app.include_router(routes_knowledge.router)
+    app.include_router(routes_research.router)
     return app
 
 

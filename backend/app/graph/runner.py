@@ -84,6 +84,11 @@ class ResearchRunner:
     def outcome(self, thread_id: str) -> RunOutcome:
         return self._outcome(thread_id)
 
+    def delete_thread(self, thread_id: str) -> None:
+        """Remove a run's checkpoints (used when a research session is deleted)."""
+        if self._graph.checkpointer is not None:
+            self._graph.checkpointer.delete_thread(thread_id)
+
     # ------------------------------------------------------------------ internals
 
     def _run(self, thread_id: str, graph_input: Any) -> RunOutcome:
