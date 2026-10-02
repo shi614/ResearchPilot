@@ -3,23 +3,39 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from langchain_core.embeddings import Embeddings
 
 from app import __version__
-from app.api import routes_health
+from app.api import routes_health, routes_knowledge
 from app.config import Settings, get_settings
 from app.database import Database
-from app.exceptions import ResearchPilotError
+from app.exceptions import ConfigurationError, ResearchPilotError
+from app.rag.embeddings import create_embeddings
+from app.rag.vectorstore import KnowledgeBaseStore
+from app.services.knowledge_service import KnowledgeService
 from app.services.model_check import ModelCheckService
 
 logger = logging.getLogger("researchpilot")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def _default_embeddings(settings: Settings) -> Embeddings | None:
+    """Gemini embeddings when a key is configured; otherwise KB search is disabled."""
+    try:
+        return create_embeddings(settings)
+    except ConfigurationError:
+        return None
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    embeddings_factory: Callable[[Settings], Embeddings | None] = _default_embeddings,
+) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -34,6 +50,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             model=settings.gemini_model,
             embedding_model=settings.gemini_embedding_model,
         )
+        store = KnowledgeBaseStore(settings.chroma_dir, embeddings_factory(settings))
+        app.state.knowledge = KnowledgeService(settings, database, store)
         if missing := settings.missing_required_keys():
             logger.warning("Missing API keys: %s — research features are disabled.", ", ".join(missing))
         logger.info("ResearchPilot backend v%s started (model: %s)", __version__, settings.gemini_model)
@@ -63,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(routes_health.router)
+    app.include_router(routes_knowledge.router)
     return app
 
 

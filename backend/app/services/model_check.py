@@ -197,11 +197,16 @@ class ModelCheckService:
                     **fields,
                 )
             if exc.code == 404:
-                return self._result(
-                    ModelCheckStatus.MODEL_UNAVAILABLE,
-                    f"Model '{self._model}' was not found for this API key.",
-                    **fields,
+                listed = fields.get("model_available") is True
+                detail = (
+                    f"Model '{self._model}' is listed for this API key but is not available "
+                    "for text generation (it may be retired or restricted for this key)."
+                    if listed
+                    else f"Model '{self._model}' was not found for this API key."
                 )
+                suggestions = [m for m in fields.get("suggested_models", []) if m != self._model]
+                hint = f" Try setting GEMINI_MODEL={suggestions[0]} in .env." if suggestions else ""
+                return self._result(ModelCheckStatus.MODEL_UNAVAILABLE, detail + hint, **fields)
             return self._result(
                 ModelCheckStatus.ERROR, f"Gemini request failed ({exc.code}): {exc.message}", **fields
             )

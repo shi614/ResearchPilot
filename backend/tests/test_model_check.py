@@ -160,3 +160,17 @@ def test_api_key_is_redacted_from_error_messages() -> None:
     result = service.check()
     assert API_KEY not in result.model_dump_json()
     assert "***" in result.message
+
+
+def test_probe_404_explains_model_is_listed_but_cannot_generate() -> None:
+    service, _ = make_service(generate_error=client_error(404, "model not found", "NOT_FOUND"))
+    result = service.check(probe=True)
+    assert result.status is ModelCheckStatus.MODEL_UNAVAILABLE
+    assert result.model_available is True
+    assert "listed for this API key but is not available for text generation" in result.message
+    assert "GEMINI_MODEL=gemini-2.5-flash-lite" in result.message  # never suggests itself
+
+
+def test_listing_404_says_not_found() -> None:
+    service, _ = make_service(list_error=client_error(404, "not found", "NOT_FOUND"))
+    assert "was not found" in service.check().message

@@ -17,6 +17,7 @@ from app.database.orm import (
     ResearchSession,
     RunEvent,
     SessionStatus,
+    new_id,
 )
 from app.exceptions import NotFoundError
 
@@ -38,7 +39,11 @@ class ResearchRepository:
         return record
 
     def list_recent(self, limit: int = 50) -> list[ResearchSession]:
-        stmt = select(ResearchSession).order_by(ResearchSession.created_at.desc()).limit(limit)
+        stmt = (
+            select(ResearchSession)
+            .order_by(ResearchSession.created_at.desc(), ResearchSession.id)
+            .limit(limit)
+        )
         return list(self._session.scalars(stmt))
 
     def update_status(
@@ -102,9 +107,15 @@ class DocumentRepository:
         self._session = session
 
     def create(
-        self, filename: str, stored_path: str, content_type: str, size_bytes: int
+        self,
+        filename: str,
+        stored_path: str,
+        content_type: str,
+        size_bytes: int,
+        document_id: str | None = None,
     ) -> Document:
         record = Document(
+            id=document_id or new_id(),
             filename=filename,
             stored_path=stored_path,
             content_type=content_type,
@@ -121,7 +132,8 @@ class DocumentRepository:
         return record
 
     def list_all(self) -> list[Document]:
-        return list(self._session.scalars(select(Document).order_by(Document.created_at.desc())))
+        stmt = select(Document).order_by(Document.created_at.desc(), Document.id)
+        return list(self._session.scalars(stmt))
 
     def mark_processed(self, document_id: str, chunk_count: int) -> Document:
         record = self.get(document_id)

@@ -10,7 +10,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.database.orm import DocumentStatus
+from app.models.domain import RetrievedChunk
 
 
 class HealthResponse(BaseModel):
@@ -42,6 +45,31 @@ class ModelCheckResponse(BaseModel):
     suggested_models: list[str] = Field(default_factory=list)
     message: str
     checked_at: datetime
+
+
+class DocumentResponse(BaseModel):
+    """A knowledge-base document (the server-side storage path is not exposed)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    chunk_count: int
+    status: DocumentStatus
+    error: str | None = None
+    created_at: datetime
+
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=1000)
+    k: int | None = Field(default=None, ge=1, le=20)
+
+
+class KnowledgeSearchResponse(BaseModel):
+    query: str
+    results: list[RetrievedChunk]
 
 
 class ErrorResponse(BaseModel):

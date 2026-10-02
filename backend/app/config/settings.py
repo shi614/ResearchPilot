@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -33,7 +34,7 @@ class Settings(BaseSettings):
     tavily_api_key: SecretStr | None = None
 
     # --- Gemini (free-tier Flash by default) ---
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
@@ -42,7 +43,18 @@ class Settings(BaseSettings):
     max_revisions: int = Field(default=1, ge=0, le=3)
     max_research_tool_rounds: int = Field(default=2, ge=1, le=5)
     tavily_max_results: int = Field(default=5, ge=1, le=20)
+    tavily_search_depth: Literal["basic", "advanced"] = "basic"  # basic = 1 credit/search
     rag_top_k: int = Field(default=4, ge=1, le=20)
+
+    # --- Knowledge base / RAG ---
+    embedding_dimensions: int = Field(default=768, ge=128, le=3072)
+    embedding_batch_size: int = Field(default=50, ge=1, le=100)
+    embedding_max_rpm: int = Field(default=30, ge=1, le=1000)
+    chunk_size: int = Field(default=1000, ge=200, le=4000)
+    chunk_overlap: int = Field(default=150, ge=0, le=1000)
+    # gemini-embedding-001 scores unrelated text ~0.45-0.55 and relevant text 0.6+
+    rag_min_relevance: float = Field(default=0.6, ge=0.0, le=1.0)
+    max_upload_mb: int = Field(default=20, ge=1, le=200)
 
     # --- Storage ---
     database_url: str = f"{SQLITE_PREFIX}data/researchpilot.db"
@@ -87,6 +99,12 @@ class Settings(BaseSettings):
                 raw_path = (PROJECT_ROOT / raw_path).resolve()
             return f"{SQLITE_PREFIX}{raw_path.as_posix()}"
         return value
+
+    @model_validator(mode="after")
+    def _overlap_smaller_than_chunk(self) -> Settings:
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+        return self
 
     @property
     def is_sqlite(self) -> bool:

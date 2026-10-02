@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.database import Database, DocumentRepository, ResearchRepository
@@ -58,10 +60,11 @@ def test_save_report_creates_then_updates_and_sets_title(database: Database) -> 
 
 
 def test_list_recent_returns_newest_first(database: Database) -> None:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     with database.session() as session:
         repo = ResearchRepository(session)
-        for query in ("first", "second", "third"):
-            repo.create(query)
+        for minutes, query in enumerate(("first", "second", "third")):
+            repo.create(query).created_at = start + timedelta(minutes=minutes)
 
     with database.session() as session:
         assert [r.query for r in ResearchRepository(session).list_recent(limit=2)] == [
