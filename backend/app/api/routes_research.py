@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi.responses import FileResponse
 
 from app.api.dependencies import get_research_service
 from app.models.agent_outputs import HumanDecision
@@ -75,6 +76,17 @@ def retry(session_id: str, service: ServiceDep) -> ResearchSessionResponse:
 @router.get("/{session_id}/report", response_model=ReportResponse, summary="Final report (JSON + Markdown)")
 def get_report(session_id: str, service: ServiceDep) -> ReportResponse:
     return service.report(session_id)
+
+
+@router.get(
+    "/{session_id}/report.pdf",
+    response_class=FileResponse,
+    summary="Download the final report as PDF",
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def download_report_pdf(session_id: str, service: ServiceDep) -> FileResponse:
+    path, filename = service.report_pdf(session_id)
+    return FileResponse(path, media_type="application/pdf", filename=filename)
 
 
 @router.delete(

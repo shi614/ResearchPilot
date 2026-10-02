@@ -184,3 +184,63 @@ def test_startup_recovers_sessions_left_running(tmp_path: Path) -> None:
     [session] = c.get("/research").json()
     assert session["status"] == "interrupted"
     c.__exit__(None, None, None)
+
+
+# --------------------------------------------------------------------------- PDF export (Phase 5)
+
+
+def completed_session(client: TestClient) -> dict:
+    session = start(client)
+    client.post(f"/research/{session['id']}/decision", json={"action": "approve"})
+    return settle(client, session["id"])
+
+
+def test_pdf_download_after_completion(client: TestClient, tmp_path: Path) -> None:
+    from io import BytesIO
+
+    from pypdf import PdfReader
+
+    session = completed_session(client)
+    response = client.get(f"/research/{session['id']}/report.pdf")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert 'filename="Solar-Energy-Cost-Trends.pdf"' in response.headers["content-disposition"]
+    text = " ".join(page.extract_text() for page in PdfReader(BytesIO(response.content)).pages)
+    assert "Solar Energy Cost Trends" in text and "References" in text and "Verification:" in text
+    assert (tmp_path / "reports" / f"{session['id']}.pdf").is_file()  # stored in REPORTS_DIR
+
+
+def test_pdf_is_cached_and_rebuilt_only_when_missing(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    import app.services.research_service as service_module
+
+    builds: list[Path] = []
+    real_build = service_module.build_report_pdf
+
+    def counting_build(*args, **kwargs):
+        builds.append(args[1])
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(service_module, "build_report_pdf", counting_build)
+    session = completed_session(client)
+    url = f"/research/{session['id']}/report.pdf"
+    first, second = client.get(url), client.get(url)
+    assert first.content == second.content and len(builds) == 1
+
+    builds[0].unlink()  # e.g. reports folder was cleaned
+    assert client.get(url).status_code == 200 and len(builds) == 2
+
+
+def test_pdf_unavailable_before_completion_or_for_unknown_session(client: TestClient) -> None:
+    session = start(client)  # awaiting approval: no report yet
+    response = client.get(f"/research/{session['id']}/report.pdf")
+    assert response.status_code == 404 and "no report yet" in response.json()["detail"]
+    assert client.get("/research/missing/report.pdf").status_code == 404
+
+
+def test_deleting_session_removes_its_pdf(client: TestClient, tmp_path: Path) -> None:
+    session = completed_session(client)
+    client.get(f"/research/{session['id']}/report.pdf")
+    pdf = tmp_path / "reports" / f"{session['id']}.pdf"
+    assert pdf.is_file()
+    assert client.delete(f"/research/{session['id']}").status_code == 204
+    assert not pdf.exists()

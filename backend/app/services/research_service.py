@@ -12,9 +12,11 @@ database (sessions, live events, reports) in sync with it.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from collections.abc import Callable
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 from app.config import Settings
@@ -31,6 +33,7 @@ from app.models.schemas import (
     ResearchStats,
     ResearchSummary,
 )
+from app.services.report_pdf import build_report_pdf
 from app.services.report_render import StoredReport, render_markdown
 
 logger = logging.getLogger(__name__)
@@ -46,6 +49,11 @@ _OUTCOME_TO_STATUS = {
     "interrupted": SessionStatus.INTERRUPTED,
 }
 RESTART_MESSAGE = "The backend stopped while this research was running. Retry to continue."
+
+
+def _pdf_filename(title: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-")[:80].rstrip("-")
+    return f"{slug or 'research-report'}.pdf"
 
 
 class ResearchService:
@@ -140,7 +148,12 @@ class ResearchService:
         if self._is_active(session_id):
             raise WorkflowError("This research is still running; wait for it to pause or finish.")
         with self._database.session() as session:
-            ResearchRepository(session).delete(session_id)
+            repo = ResearchRepository(session)
+            record = repo.get(session_id)
+            pdf_path = record.report.pdf_path if record.report else None
+            repo.delete(session_id)
+        if pdf_path:
+            Path(pdf_path).unlink(missing_ok=True)
         try:
             self.runner().delete_thread(session_id)
         except ConfigurationError:
@@ -188,6 +201,23 @@ class ResearchService:
             quality_notes=stored.quality_notes,
             created_at=created_at,
         )
+
+    def report_pdf(self, session_id: str) -> tuple[Path, str]:
+        """Path and download name of the report PDF; built on first request, then cached."""
+        with self._database.session() as session:
+            record = ResearchRepository(session).get(session_id)
+            if record.report is None:
+                raise NotFoundError("This research has no report yet.")
+            cached, content_json = record.report.pdf_path, record.report.content_json
+            title, query, created_at = record.report.title, record.query, record.report.created_at
+        filename = _pdf_filename(title)
+        if cached and Path(cached).is_file():
+            return Path(cached), filename
+        path = self._settings.reports_dir / f"{session_id}.pdf"
+        build_report_pdf(StoredReport.from_json(content_json), path, query=query, generated_at=created_at)
+        with self._database.session() as session:
+            ResearchRepository(session).set_pdf_path(session_id, str(path))
+        return path, filename
 
     # ------------------------------------------------------------------ internals
 

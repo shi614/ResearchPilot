@@ -98,6 +98,12 @@ class ResearchRepository:
         self._session.flush()
         return record.report
 
+    def set_pdf_path(self, session_id: str, pdf_path: str) -> None:
+        record = self.get(session_id)
+        if record.report is not None:
+            record.report.pdf_path = pdf_path
+            self._session.flush()
+
     def delete(self, session_id: str) -> None:
         self._session.delete(self.get(session_id))
         self._session.flush()
