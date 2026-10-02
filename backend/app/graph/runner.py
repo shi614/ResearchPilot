@@ -38,7 +38,7 @@ class RunOutcome:
     @property
     def retryable(self) -> bool:
         """Stopped mid-workflow (quota, service outage): `retry()` continues from the checkpoint."""
-        return self.status in ("failed", "quota_exhausted") and bool(self.pending_nodes)
+        return self.status in ("failed", "quota_exhausted", "interrupted") and bool(self.pending_nodes)
 
 
 class ResearchRunner:
@@ -113,6 +113,10 @@ class ResearchRunner:
             status = values.get("status", "failed")
             if not snapshot.next and status not in TERMINAL_STATUSES:
                 status = "failed"  # the graph ended early (e.g. no sources were found)
+            elif snapshot.next and status not in TERMINAL_STATUSES:
+                # Read back after the process that ran it stopped mid-workflow (error, quota,
+                # crash): the live exception is gone, but pending nodes prove it never finished.
+                status = "interrupted"
         if error is None and status == "failed" and values.get("errors"):
             error = values["errors"][-1].message
         return RunOutcome(

@@ -225,6 +225,10 @@ def test_writer_outage_stops_resumably_and_retry_finishes(tmp_path: Path) -> Non
     assert stopped.status == "failed" and "503" in stopped.error
     assert stopped.pending_nodes == ("writer",) and stopped.retryable
 
+    # A fresh process reading the checkpoint must still see a stopped, retryable run.
+    reloaded = make_runner(llm, checkpointer=create_checkpointer(db)).outcome("t1")
+    assert reloaded.status == "interrupted" and reloaded.retryable
+
     resumed = make_runner(llm, checkpointer=create_checkpointer(db)).retry("t1")
     assert resumed.status == "completed" and not resumed.retryable
     assert llm.calls_for("planning") == 1 and llm.calls_for("report writing") == 2
