@@ -49,3 +49,19 @@ def test_model_check_endpoint_passes_probe_flag_and_hides_key(client_factory) ->
 
 def test_openapi_docs_available(client_factory) -> None:
     assert client_factory().get("/openapi.json").status_code == 200
+
+
+def test_config_endpoint_exposes_limits_but_never_keys(client_factory) -> None:
+    client = client_factory(gemini_api_key=GEMINI_KEY, tavily_api_key=TAVILY_KEY, max_web_searches=3)
+    response = client.get("/health/config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["gemini_max_rpm"] == 8 and body["max_web_searches"] == 3
+    assert body["research_enabled"] is True and body["web_research_enabled"] is True
+    assert GEMINI_KEY not in response.text and TAVILY_KEY not in response.text
+    assert not any("key" in field for field in body)
+
+
+def test_config_reports_disabled_features_without_keys(client_factory) -> None:
+    body = client_factory().get("/health/config").json()
+    assert body["research_enabled"] is False and body["web_research_enabled"] is False

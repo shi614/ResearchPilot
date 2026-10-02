@@ -11,7 +11,7 @@ from app import __version__
 from app.api.dependencies import get_app_settings, get_database, get_model_check_service
 from app.config import Settings
 from app.database import Database
-from app.models.schemas import HealthResponse, ModelCheckResponse
+from app.models.schemas import ConfigResponse, HealthResponse, ModelCheckResponse
 from app.services.model_check import ModelCheckService
 
 router = APIRouter(prefix="/health", tags=["health"])
@@ -48,3 +48,13 @@ async def check_models(
     refresh: Annotated[bool, Query(description="Bypass the 5-minute result cache.")] = False,
 ) -> ModelCheckResponse:
     return await run_in_threadpool(service.check, probe=probe, refresh=refresh)
+
+
+@router.get("/config", response_model=ConfigResponse, summary="Non-secret runtime configuration")
+def config(settings: Annotated[Settings, Depends(get_app_settings)]) -> ConfigResponse:
+    derived = {"web_research_enabled", "research_enabled"}
+    return ConfigResponse(
+        **settings.model_dump(include=set(ConfigResponse.model_fields) - derived),
+        web_research_enabled=settings.tavily_api_key is not None,
+        research_enabled=settings.gemini_api_key is not None,
+    )

@@ -27,6 +27,27 @@ class HealthResponse(BaseModel):
     gemini_model: str
 
 
+class ConfigResponse(BaseModel):
+    """Non-secret runtime configuration shown on the Settings page (keys are never included)."""
+
+    gemini_model: str
+    gemini_embedding_model: str
+    gemini_max_rpm: int
+    max_revisions: int
+    max_research_iterations: int
+    max_web_searches: int
+    max_research_tool_rounds: int
+    writer_max_sources: int
+    tavily_search_depth: str
+    rag_top_k: int
+    rag_min_relevance: float
+    chunk_size: int
+    chunk_overlap: int
+    max_upload_mb: int
+    web_research_enabled: bool
+    research_enabled: bool
+
+
 class ModelCheckStatus(str, Enum):
     OK = "ok"
     MODEL_UNAVAILABLE = "model_unavailable"
