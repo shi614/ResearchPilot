@@ -6,6 +6,7 @@ from typing import Any
 
 from app.agents import prompts
 from app.agents.base import AgentDependencies, CallCounter, error, merge, progress
+from app.agents.evidence_selection import report_evidence
 from app.agents.formatting import format_evidence, report_to_markdown
 from app.exceptions import ExternalServiceError, RateLimitError
 from app.graph.state import ResearchState
@@ -25,9 +26,10 @@ class RevisionAgent:
             f"- [{i.severity}/{i.category}] {i.location}: {i.description} → {i.suggestion}" for i in issues
         )
         counter = CallCounter(self._deps.llm)
+        evidence = report_evidence(state.get("evidence", []), state.get("report_evidence_ids"))
         user = (
             f"Issues to fix:\n{issue_text}\n\nCurrent report:\n{report_to_markdown(state['draft_report'])}\n\n"
-            f"Evidence (cite only these IDs):\n{format_evidence(state.get('evidence', []), max_chars=500)}"
+            f"Evidence (cite only these IDs):\n{format_evidence(evidence, max_chars=500)}"
         )
         try:
             revised = self._deps.llm.structured(ResearchReport, prompts.REVISER, user, operation="revision")

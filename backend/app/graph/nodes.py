@@ -8,6 +8,7 @@ from typing import Any
 from langgraph.types import interrupt
 
 from app.agents.base import merge, progress
+from app.agents.evidence_selection import report_evidence
 from app.agents.formatting import CITATION_PATTERN, cited_ids
 from app.config import Settings
 from app.graph.state import ResearchState
@@ -87,7 +88,9 @@ def sanitize_report(report: ResearchReport, valid_ids: set[str]) -> ResearchRepo
 
 def finalize(state: ResearchState) -> dict[str, Any]:
     """Build the final report and its citations strictly from collected evidence."""
-    evidence = {e.source.id: e for e in state.get("evidence", [])}
+    evidence = {
+        e.source.id: e for e in report_evidence(state.get("evidence", []), state.get("report_evidence_ids"))
+    }
     report = sanitize_report(state["draft_report"], set(evidence))
     citations = [
         Citation(

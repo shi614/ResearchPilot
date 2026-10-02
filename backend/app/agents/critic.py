@@ -11,6 +11,7 @@ from typing import Any
 
 from app.agents import prompts
 from app.agents.base import AgentDependencies, CallCounter, error, merge, progress
+from app.agents.evidence_selection import report_evidence
 from app.agents.formatting import CITATION_PATTERN, extract_citation_ids, format_evidence, report_to_markdown
 from app.exceptions import ExternalServiceError, RateLimitError
 from app.graph.state import ResearchState
@@ -71,7 +72,7 @@ class CriticAgent:
 
     def __call__(self, state: ResearchState) -> dict[str, Any]:
         report = state["draft_report"]
-        evidence = state.get("evidence", [])
+        evidence = report_evidence(state.get("evidence", []), state.get("report_evidence_ids"))
         deterministic = check_citations(report, {e.source.id for e in evidence})
         counter = CallCounter(self._deps.llm)
         updates: list[dict[str, Any]] = []

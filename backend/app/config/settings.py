@@ -44,7 +44,8 @@ class Settings(BaseSettings):
     max_research_tool_rounds: int = Field(default=2, ge=1, le=5)
     tavily_max_results: int = Field(default=5, ge=1, le=20)
     tavily_search_depth: Literal["basic", "advanced"] = "basic"  # basic = 1 credit/search
-    max_web_searches: int = Field(default=6, ge=1, le=20)  # per research iteration
+    max_web_searches: int = Field(default=3, ge=1, le=20)  # per research iteration
+    writer_max_sources: int = Field(default=14, ge=5, le=30)  # best sources passed to the writer
     max_research_iterations: int = Field(default=2, ge=1, le=5)  # "Modify research" limit
     llm_timeout_seconds: int = Field(default=120, ge=10, le=600)
     rag_top_k: int = Field(default=4, ge=1, le=20)

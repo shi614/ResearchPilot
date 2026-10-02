@@ -48,6 +48,7 @@ class ResearchState(TypedDict, total=False):
     analysis: AnalysisNotes | None
 
     # --- writing / critique loop ---
+    report_evidence_ids: list[str]  # best sources selected for the writer
     draft_report: ResearchReport
     critique: Critique
     needs_revision: bool
