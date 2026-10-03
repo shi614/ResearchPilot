@@ -104,6 +104,7 @@ def run_page(page: str, fake: FakeClient, active_session: str | None = None) -> 
 
 def texts(app: AppTest) -> str:
     parts = [m.value for m in app.markdown] + [e.value for e in app.caption] + [t.value for t in app.title]
+    parts += [h.value for h in app.header]
     parts += [x.value for kind in (app.info, app.warning, app.error, app.success, app.subheader) for x in kind]
     return "\n".join(str(p) for p in parts)
 
@@ -115,11 +116,13 @@ def button(app: AppTest, label: str):
 # --------------------------------------------------------------------------- new research
 
 
-def test_start_form_renders_with_limits() -> None:
+def test_start_form_renders_user_facing_content() -> None:
     app = run_page("research", FakeClient())
     assert not app.exception
-    assert "ResearchPilot" in texts(app) and "Multi-Agent AI Research" in texts(app)
-    assert len(app.text_area) == 2 and "up to 3 web searches" in texts(app)
+    page = texts(app)
+    assert "ResearchPilot" in page and "Multi-Agent AI Research" in page
+    assert len(app.text_area) == 2 and "pauses for your review" in page and "How it works" in page
+    assert "web searches" not in page and "gemini" not in page.lower()  # no technical limits on the main page
 
 
 def test_start_requires_a_topic_then_starts_research() -> None:
@@ -137,7 +140,7 @@ def test_start_requires_a_topic_then_starts_research() -> None:
 
 def test_research_disabled_without_gemini_key() -> None:
     app = run_page("research", FakeClient(config=CONFIG | {"research_enabled": False}))
-    assert "GEMINI_API_KEY is not configured" in texts(app)
+    assert "AI service isn't configured" in texts(app) and "GEMINI_API_KEY" not in texts(app)
     assert button(app, "Start Research").disabled
 
 
@@ -155,7 +158,7 @@ def test_approval_panel_approve_modify_cancel() -> None:
                                        approval_request=APPROVAL))
     app = run_page("research", fake, active_session="s1")
     page = texts(app)
-    assert "your approval is needed" in page and "RAG reduces unsupported answers" in page
+    assert "Review the research before the report is written" in page and "RAG reduces unsupported answers" in page
     assert "What are its limitations?" in page
 
     button(app, "Generate Final Report").click().run()
@@ -176,7 +179,7 @@ def test_modify_disabled_at_iteration_limit() -> None:
                                        approval_request=APPROVAL | {"can_modify": False}))
     app = run_page("research", fake, active_session="s1")
     assert button(app, "Run another research iteration").disabled
-    assert "modification limit" in texts(app)
+    assert "maximum number of times" in texts(app)
 
 
 def test_completed_session_shows_report_sources_and_pdf() -> None:
@@ -187,6 +190,7 @@ def test_completed_session_shows_report_sources_and_pdf() -> None:
     app = run_page("research", fake, active_session="s1")
     assert not app.exception
     assert "Body [W1]." in texts(app)
+    assert not any(m.value.lstrip().startswith("# ") for m in app.markdown)  # title not repeated in the body
     assert fake.called("get_report") and fake.called("get_report_pdf")
     assert app.get("download_button")  # PDF download offered
     assert app.dataframe  # sources table
@@ -233,22 +237,40 @@ def test_empty_states(page: str, message: str) -> None:
 def test_history_lists_sessions() -> None:
     rows = [session("completed", id="a", title="Report A"), session("failed", id="b")]
     app = run_page("history", FakeClient(list_research=rows))
-    assert app.dataframe and "Select a row" in texts(app)
+    assert app.dataframe and "2 research sessions" in texts(app)
 
 
 def test_knowledge_base_lists_documents() -> None:
     docs = [{"id": "d1", "filename": "notes.pdf", "content_type": "application/pdf", "size_bytes": 2048,
              "chunk_count": 7, "status": "processed", "error": None, "created_at": NOW}]
     app = run_page("knowledge", FakeClient(list_documents=docs))
-    assert app.dataframe and "1 document(s)" in texts(app)
+    assert app.dataframe and "1 document." in texts(app)
 
 
-def test_settings_shows_health_config_and_model_check() -> None:
-    fake = FakeClient()
+def test_settings_is_a_user_facing_overview() -> None:
+    docs = [{"id": "d1", "filename": "a.pdf", "content_type": "application/pdf", "size_bytes": 1, "chunk_count": 7,
+             "status": "processed", "error": None, "created_at": NOW},
+            {"id": "d2", "filename": "b.pdf", "content_type": "application/pdf", "size_bytes": 1, "chunk_count": 0,
+             "status": "failed", "error": "No text", "created_at": NOW}]
+    fake = FakeClient(list_documents=docs)
     app = run_page("settings", fake)
-    assert "gemini-3.5-flash" in texts(app) and "Gemini requests / minute: `8`" in texts(app)
-    button(app, "Check availability").click().run()
-    assert fake.called("model_check") == [("model_check", False)]
+    assert not app.exception
+    page = texts(app)
+    assert "All systems operational" in page and "Gemini 3.5 Flash" in page
+    assert "1 document ready" in page and "7 searchable passages" in page and "1 document needs attention" in page
+    assert "About ResearchPilot" in page
+    for technical in ("requests / minute", "Tool-calling", "Chunk", "Minimum relevance", "Max upload",
+                      "Database", "API key", "Tavily key", "Critic revisions", "Research iterations"):
+        assert technical.lower() not in page.lower(), technical
+    assert not any(b.label in ("Test with one request", "Check availability") for b in app.button)
+    assert not fake.called("model_check")  # never spends Gemini quota
+
+
+def test_settings_reports_limited_features_simply() -> None:
+    app = run_page("settings", FakeClient(config=CONFIG | {"web_research_enabled": False}))
+    assert "web search is unavailable" in texts(app)
+    app = run_page("settings", FakeClient(config=CONFIG | {"research_enabled": False}))
+    assert any("Research is unavailable" in e.value for e in app.error)
 
 
 @pytest.mark.parametrize("page", ["research", "history", "knowledge", "settings"])
@@ -264,4 +286,16 @@ def test_full_app_boots_with_navigation_and_sidebar_status() -> None:
     app.run()
     assert not app.exception
     assert "ResearchPilot" in texts(app)
-    assert any("Backend online" in s.value for s in app.sidebar.success)
+    assert any("Online" in m.value for m in app.sidebar.markdown)  # simple status badge
+
+
+def test_timestamps_are_shown_in_local_time_and_counts_pluralised() -> None:
+    from datetime import UTC, datetime
+
+    from frontend.components import local_time, plural
+
+    expected = datetime(2026, 10, 2, 18, 30, tzinfo=UTC).astimezone().strftime("%d %b %Y, %H:%M")
+    assert local_time("2026-10-02T18:30:00") == expected  # naive backend value treated as UTC
+    assert local_time("2026-10-02T18:30:00+00:00") == expected
+    assert local_time("not a date") == "not a date"
+    assert plural(1, "passage") == "1 passage" and plural(7, "passage") == "7 passages"

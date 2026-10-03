@@ -1,14 +1,32 @@
 [theme]
 base = "light"
-primaryColor = "#1f4e8c"
+primaryColor = "#2b59c3"
 backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f3f6fa"
-textColor = "#1a1f2b"
+secondaryBackgroundColor = "#f4f6fb"
+textColor = "#1b2333"
+linkColor = "#2b59c3"
+codeTextColor = "#3b4a63"
+codeBackgroundColor = "#eef2f8"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFontSizes = ["2.1rem", "1.45rem", "1.15rem", "1rem", "0.95rem", "0.9rem"]
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+baseRadius = "0.6rem"
+borderColor = "#e3e8f0"
+showSidebarBorder = true
+
+[theme.sidebar]
+backgroundColor = "#f7f9fc"
+secondaryBackgroundColor = "#eef2f8"
+headingFontSizes = ["1.3rem", "1.1rem", "1rem", "0.95rem", "0.9rem", "0.85rem"]
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = "type"
 
 [server]
 headless = true
 address = "localhost"  # local only: the app has no authentication
-maxUploadSize = 200
+maxUploadSize = 20  # matches the backend default MAX_UPLOAD_MB
 
 [browser]
 gatherUsageStats = false

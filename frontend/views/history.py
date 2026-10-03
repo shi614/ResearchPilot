@@ -4,26 +4,25 @@ from __future__ import annotations
 
 import streamlit as st
 
-from frontend.components import call, client, go_to, open_session, page_header
+from frontend.components import call, client, go_to, local_time, open_session, page_header, plural
 from frontend.workflow import STATUS_BADGES
 
 
 def render() -> None:
-    page_header("Research History", "Previous research sessions, newest first.")
+    page_header("Research History", "Revisit earlier research, continue paused runs or download reports.")
     sessions = call(lambda: client().list_research(), failure="Could not load research history")
     if sessions is None:
         return
     if not sessions:
-        st.info("No research yet. Start one from **New Research**.", icon=":material/history:")
+        st.info("No research yet. Start your first one from **New Research**.", icon=":material/history:")
         return
 
     rows = [
         {
-            "Date": str(s["created_at"])[:16].replace("T", " "),
-            "Query": s["query"],
-            "Report title": s.get("title") or "-",
+            "Date": local_time(s["created_at"]),
+            "Topic": s["query"],
+            "Report": s.get("title") or "—",
             "Status": STATUS_BADGES.get(s["status"], (s["status"],))[0],
-            "Report": "Yes" if s["has_report"] else "No",
         }
         for s in sessions
     ]
@@ -31,7 +30,7 @@ def render() -> None:
                              selection_mode="single-row", key="history_table")
     selected = selection.selection.rows if selection else []
     if not selected:
-        st.caption("Select a row to open or delete it.")
+        st.caption(f"{plural(len(sessions), 'research session')}. Select one to open or delete it.")
         return
 
     session = sessions[selected[0]]

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="40" viewBox="0 0 220 40" role="img" aria-label="ResearchPilot">
+  <rect x="2" y="4" width="32" height="32" rx="8" fill="#2b59c3"/>
+  <circle cx="18" cy="20" r="9" fill="none" stroke="#ffffff" stroke-width="2"/>
+  <path d="M22.5 15.5 L19.6 21.6 L13.5 24.5 L16.4 18.4 Z" fill="#ffffff"/>
+  <text x="44" y="27" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700" fill="#1b2333">Research<tspan fill="#2b59c3">Pilot</tspan></text>
+</svg>

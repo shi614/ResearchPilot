@@ -13,6 +13,7 @@ from frontend.components import (
     call,
     client,
     open_session,
+    page_header,
     report_view,
     stage_tracker,
     stats_row,
@@ -22,56 +23,69 @@ from frontend.workflow import is_active
 
 POLL_SECONDS = 2
 
+HOW_IT_WORKS = [
+    (":material/travel_explore:", "Plan & search", "Agents plan the research and search the web and your documents."),
+    (":material/fact_check:", "Verify sources", "Sources are cross-checked; weak or conflicting claims are flagged."),
+    (":material/front_hand:", "You review", "Approve the findings or ask for more research before writing."),
+    (":material/description:", "Cited report", "A structured, fact-checked report with references and a PDF."),
+]
+
 
 def render() -> None:
-    st.title("ResearchPilot")
-    st.caption("Multi-Agent AI Research & Report Generation System")
     session_id = st.session_state.get(ACTIVE_SESSION_KEY)
     if session_id:
         _session_view(session_id)
     else:
+        page_header("ResearchPilot", "Multi-Agent AI Research & Report Generation System")
         _start_form()
+        _how_it_works()
 
 
 # --------------------------------------------------------------------------- start
 
 
 def _start_form() -> None:
-    config = call(lambda: client().config(), failure="Could not load backend settings")
+    config = call(lambda: client().config(), failure="Could not load the app settings")
+    research_enabled = config is None or config["research_enabled"]
     if config is not None and not config["research_enabled"]:
-        st.error("Research is disabled: GEMINI_API_KEY is not configured on the backend. "
-                 "Add it to `.env` and restart the backend.", icon=":material/key_off:")
+        st.error("Research is unavailable because the AI service isn't configured yet. "
+                 "See the setup guide in the README.", icon=":material/key_off:")
     elif config is not None and not config["web_research_enabled"]:
-        st.warning("TAVILY_API_KEY is not configured: research will use the knowledge base only.",
+        st.warning("Web search is unavailable right now, so research will use your knowledge base only.",
                    icon=":material/travel_explore:")
 
     with st.form("start_research", border=True):
         query = st.text_area(
-            "Research topic or question",
+            "What would you like to research?",
             placeholder="e.g. What are the main benefits and limitations of Retrieval-Augmented Generation?",
             max_chars=2000,
         )
-        instructions = st.text_area(
-            "Optional instructions",
-            placeholder="e.g. Focus on enterprise use cases and research published since 2023",
-            max_chars=2000,
-            height=80,
-        )
-        files = st.file_uploader(
-            "Add documents to the knowledge base (optional)",
-            type=["pdf", "txt", "md", "markdown"],
-            accept_multiple_files=True,
-            help="Uploaded files are chunked, embedded and searched by the knowledge-base agent.",
-        )
+        with st.expander("Add instructions or documents (optional)", icon=":material/tune:"):
+            instructions = st.text_area(
+                "Instructions",
+                placeholder="e.g. Focus on enterprise use cases and research published since 2023",
+                max_chars=2000,
+                height=80,
+            )
+            files = st.file_uploader(
+                "Documents to search alongside the web",
+                type=["pdf", "txt", "md", "markdown"],
+                accept_multiple_files=True,
+                help="Added to your knowledge base so the agents can cite them.",
+            )
         submitted = st.form_submit_button("Start Research", type="primary", icon=":material/rocket_launch:",
-                                          disabled=config is not None and not config["research_enabled"])
-    if limits := config:
-        st.caption(
-            f"Model `{limits['gemini_model']}` · up to {limits['max_web_searches']} web searches per iteration · "
-            f"{limits['max_revisions']} critic revision(s) · approval required before the final report"
-        )
+                                          disabled=not research_enabled)
+    st.caption(":material/info: Research pauses for your review before the final report is written.")
     if submitted:
         _start(query.strip(), instructions.strip(), files or [])
+
+
+def _how_it_works() -> None:
+    st.markdown('<p class="rp-section">How it works</p>', unsafe_allow_html=True)
+    for column, (icon, title, text) in zip(st.columns(4), HOW_IT_WORKS, strict=True):
+        with column, st.container(border=True, height="stretch"):
+            st.markdown(f"{icon} **{title}**")
+            st.caption(text)
 
 
 def _start(query: str, instructions: str, files: list[Any]) -> None:
@@ -79,11 +93,11 @@ def _start(query: str, instructions: str, files: list[Any]) -> None:
         st.warning("Please enter a research topic (at least 3 characters).")
         return
     for file in files:
-        with st.spinner(f"Uploading and indexing {file.name}..."):
+        with st.spinner(f"Adding {file.name} to your knowledge base..."):
             document = call(lambda f=file: client().upload_document(f.name, f.getvalue()),
-                            failure=f"Could not upload {file.name}")
+                            failure=f"Could not add {file.name}")
         if document and document["status"] == "failed":
-            st.warning(f"{file.name} was saved but could not be indexed: {document['error']}")
+            st.warning(f"{file.name} was saved but could not be read: {document['error']}")
     session = call(lambda: client().start_research(query, instructions or None), failure="Could not start research")
     if session:
         open_session(session["id"])
@@ -113,9 +127,10 @@ def _live_panel(session_id: str, rendered_status: str) -> None:
     if status != rendered_status:
         st.rerun(scope="app")  # status changed: re-render the page (stops/starts polling)
 
-    header, actions = st.columns([4, 1])
+    header, actions = st.columns([4, 1], vertical_alignment="center")
     with header:
-        st.subheader(session.get("title") or session["query"])
+        st.markdown('<p class="rp-eyebrow">Research</p>', unsafe_allow_html=True)
+        st.header(session.get("title") or session["query"], anchor=False)
         status_badge(status)
         if session.get("instructions"):
             st.caption(f"Instructions: {session['instructions']}")
@@ -143,14 +158,14 @@ def _live_panel(session_id: str, rendered_status: str) -> None:
 
 def _stopped_panel(session: dict[str, Any]) -> None:
     messages = {
-        "quota_exhausted": "The Gemini free-tier quota was exhausted.",
+        "quota_exhausted": "The AI service's usage limit has been reached for now.",
         "interrupted": "The research stopped before finishing.",
         "failed": "The research stopped because of an error.",
     }
     st.error(f"{messages.get(session['status'], 'The research stopped.')} {session.get('error') or ''}",
              icon=":material/error:")
     if session.get("retryable"):
-        st.caption("All completed steps are saved. Retrying continues from the step that failed.")
+        st.caption("Completed steps are saved. Retrying continues from the step that stopped.")
         if st.button("Retry from last checkpoint", type="primary", icon=":material/replay:", key="retry"):
             if call(lambda: client().retry(session["id"]), failure="Could not retry"):
                 st.rerun(scope="app")

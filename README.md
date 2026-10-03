@@ -217,9 +217,10 @@ python run.py backend      # FastAPI — interactive docs at http://127.0.0.1:80
 python run.py frontend     # Streamlit UI at http://localhost:8501
 ```
 
-Verify your Gemini setup (one tiny request): open **Settings → Test with one request**, or
+Verify your Gemini setup (one tiny request):
 `GET http://127.0.0.1:8000/health/models?probe=true`. If the model is unavailable, the
-response suggests compatible Flash models.
+response suggests compatible Flash models. The app's **Settings & About** page shows the
+active model, knowledge-base status and overall system status.
 
 Terminal mode (no UI):
 

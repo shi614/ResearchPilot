@@ -1,69 +1,105 @@
-"""Settings: backend health, model availability and the active (read-only) configuration."""
+"""Settings & About: a user-facing overview of the AI model, knowledge base, status and project.
+
+Technical configuration (limits, keys, chunking, etc.) stays in the backend `.env` and its
+health/config endpoints; it is intentionally not shown here.
+"""
 
 from __future__ import annotations
 
+from typing import Any
+
 import streamlit as st
 
-from frontend.components import call, client, page_header
+from frontend.api_client import ApiError
+from frontend.components import call, client, go_to, page_header, plural, section
+
+AGENTS = [
+    ("Planner", "turns your question into focused research questions and searches"),
+    ("Web research", "searches the web and reads the most relevant pages"),
+    ("Knowledge base", "finds relevant passages in your uploaded documents"),
+    ("Source verification", "cross-checks sources and flags weak or conflicting claims"),
+    ("Analysis", "identifies findings, patterns and gaps"),
+    ("Writer", "drafts a structured report with inline citations"),
+    ("Fact checker", "reviews the draft against the evidence"),
+    ("Reviser", "fixes significant issues before the report is finalised"),
+]
 
 
 def render() -> None:
-    page_header(
-        "Settings",
-        "Configuration is read from the backend's `.env` file. Edit it and restart the backend to change it.",
-    )
-    health = call(lambda: client().health(), failure="Could not reach the backend")
+    page_header("Settings & About", "Your research assistant at a glance.")
+    health = call(lambda: client().health(), failure="Could not reach ResearchPilot")
     if health is None:
         return
+    config = _optional(lambda: client().config())
+    documents = _optional(lambda: client().list_documents())
 
-    st.subheader("Backend status")
-    a, b, c, d = st.columns(4)
-    a.metric("Backend", "OK" if health["status"] == "ok" else "Degraded")
-    b.metric("Database", health["database"].capitalize())
-    c.metric("Gemini key", "Configured" if health["gemini_api_key_configured"] else "Missing")
-    d.metric("Tavily key", "Configured" if health["tavily_api_key_configured"] else "Missing")
-    if health["missing_keys"]:
-        st.warning(f"Missing in `.env`: {', '.join(health['missing_keys'])}", icon=":material/key_off:")
+    _system_status(config)
+    model_col, kb_col = st.columns(2, gap="medium")
+    with model_col, st.container(border=True, height="stretch"):
+        section("AI model")
+        model = (config or {}).get("gemini_model") or health["gemini_model"]
+        st.markdown(f"### {_model_name(model)}")
+        st.caption(f"Model ID: {model}")
+        st.write("Answers are grounded in sources from the web and your knowledge base, with citations.")
+    with kb_col, st.container(border=True, height="stretch"):
+        section("Knowledge base")
+        _knowledge_summary(documents)
 
-    st.subheader("Gemini model")
-    st.write(f"Configured model: `{health['gemini_model']}`")
-    check_col, probe_col = st.columns(2)
-    result = None
-    if check_col.button("Check availability", icon=":material/fact_check:", help="Lists models; uses no quota"):
-        result = call(lambda: client().model_check(), failure="Model check failed")
-    if probe_col.button("Test with one request", icon=":material/bolt:",
-                        help="Sends one tiny request (uses 1 Gemini call from your free-tier quota)"):
-        result = call(lambda: client().model_check(probe=True), failure="Model probe failed")
-    if result:
-        (st.success if result["status"] == "ok" else st.error)(result["message"])
-        if result["status"] != "ok" and result.get("suggested_models"):
-            st.caption("Available Flash models: " + ", ".join(f"`{m}`" for m in result["suggested_models"]))
+    with st.container(border=True):
+        section("About ResearchPilot")
+        st.write(
+            "ResearchPilot is a multi-agent AI research assistant. A team of specialised agents researches "
+            "your question, checks the sources against each other, pauses for your approval, and then "
+            "writes a cited report you can download as a PDF."
+        )
+        left, right = st.columns(2, gap="large")
+        for column, agents in ((left, AGENTS[:4]), (right, AGENTS[4:])):
+            with column:
+                st.markdown("\n".join(f"- **{name}** {text}" for name, text in agents))
+        st.caption(f"Version {health['version']} · Built with LangGraph, Gemini, Tavily, ChromaDB, FastAPI "
+                   "and Streamlit.")
 
-    config = call(lambda: client().config(), failure="Could not load configuration")
+    st.caption(":material/info: Configuration is managed in the backend's .env file.")
+
+
+def _optional(action: Any) -> Any:
+    """Secondary information: show the page even if it cannot be loaded."""
+    try:
+        return action()
+    except ApiError:
+        return None
+
+
+def _system_status(config: dict[str, Any] | None) -> None:
     if config is None:
+        st.warning("Some information could not be loaded.", icon=":material/warning:")
+    elif not config["research_enabled"]:
+        st.error("Research is unavailable: the AI service isn't configured yet.", icon=":material/error:")
+    elif not config["web_research_enabled"]:
+        st.warning("Running with limited features: web search is unavailable.", icon=":material/warning:")
+    else:
+        st.success("All systems operational", icon=":material/check_circle:")
+
+
+def _model_name(model_id: str) -> str:
+    """'gemini-3.5-flash' -> 'Gemini 3.5 Flash'."""
+    words = model_id.replace("models/", "").split("-")
+    return " ".join(word if any(ch.isdigit() for ch in word) else word.capitalize() for word in words)
+
+
+def _knowledge_summary(documents: list[dict[str, Any]] | None) -> None:
+    if documents is None:
+        st.write("Knowledge base information is unavailable right now.")
         return
-    st.subheader("Active configuration")
-    groups = {
-        "Models": [("Chat model", "gemini_model"), ("Embedding model", "gemini_embedding_model")],
-        "Free-tier protection": [
-            ("Gemini requests / minute", "gemini_max_rpm"),
-            ("Web searches per iteration", "max_web_searches"),
-            ("Tool-calling rounds", "max_research_tool_rounds"),
-            ("Critic revisions", "max_revisions"),
-            ("Research iterations (incl. modifications)", "max_research_iterations"),
-            ("Sources given to the writer", "writer_max_sources"),
-        ],
-        "Knowledge base": [
-            ("Chunk size (chars)", "chunk_size"),
-            ("Chunk overlap (chars)", "chunk_overlap"),
-            ("Results per question", "rag_top_k"),
-            ("Minimum relevance", "rag_min_relevance"),
-            ("Max upload (MB)", "max_upload_mb"),
-        ],
-    }
-    columns = st.columns(len(groups))
-    for column, (title, items) in zip(columns, groups.items(), strict=True):
-        with column, st.container(border=True):
-            st.markdown(f"**{title}**")
-            for label, key in items:
-                st.markdown(f"{label}: `{config[key]}`")
+    ready = [d for d in documents if d["status"] == "processed"]
+    needs_attention = len(documents) - len(ready)
+    st.markdown(f"### {plural(len(ready), 'document')} ready")
+    if not documents:
+        st.caption("Upload PDFs, text or Markdown files so the agents can cite your own material.")
+    else:
+        st.caption(plural(sum(d["chunk_count"] for d in ready), "searchable passage"))
+    if needs_attention:
+        verb = "needs" if needs_attention == 1 else "need"
+        st.caption(f":material/warning: {plural(needs_attention, 'document')} {verb} attention")
+    if st.button("Manage knowledge base", icon=":material/library_books:", key="manage_kb"):
+        go_to("knowledge")
