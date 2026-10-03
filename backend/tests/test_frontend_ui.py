@@ -12,6 +12,7 @@ from frontend.api_client import BackendUnavailable
 
 APP_FILE = str(Path(__file__).resolve().parents[2] / "frontend" / "streamlit_app.py")
 NOW = "2026-10-02T18:30:00"
+TIMEOUT = 90  # first run may load pyarrow natively (slow on a cold Windows machine)
 
 CONFIG = {
     "gemini_model": "gemini-3.5-flash", "gemini_embedding_model": "gemini-embedding-001", "gemini_max_rpm": 8,
@@ -22,6 +23,9 @@ CONFIG = {
 }
 HEALTH = {"status": "ok", "version": "0.1.0", "database": "ok", "gemini_api_key_configured": True,
           "tavily_api_key_configured": True, "missing_keys": [], "gemini_model": "gemini-3.5-flash"}
+TECHNICAL_TERMS = ("requests / minute", "requests per minute", "Tool-calling", "Chunk size", "Chunk overlap",
+                   "Minimum relevance", "Max upload", "Database", "API key", "Tavily key", "Critic revisions",
+                   "Research iterations", "RPM", "backend URL")
 
 
 def event(node: str, status: str = "completed", message: str = "done") -> dict:
@@ -34,7 +38,7 @@ def session(status: str, **extra: Any) -> dict:
         "created_at": NOW, "updated_at": NOW, "has_report": status == "completed", "instructions": None,
         "error": None, "retryable": False, "pending_nodes": [], "approval_request": None, "errors": [],
         "stats": {"llm_calls": 5, "web_searches": 3, "web_sources": 9, "knowledge_base_sources": 1, "evidence": 10,
-                  "evidence_web": 9, "evidence_knowledge_base": 1, "iteration": 1, "revisions": 0},
+                  "evidence_web": 9, "evidence_knowledge_base": 1, "iteration": 1, "revisions": 1},
         "events": [event("planner"), event("web_research"), event("rag_research")],
     } | extra
 
@@ -43,14 +47,28 @@ APPROVAL = {
     "type": "approval_request", "iteration": 1, "can_modify": True,
     "research_questions": ["What are RAG's benefits?", "What are its limitations?"],
     "sources": {"web": 9, "knowledge_base": 1, "total": 10}, "answer_summary": "RAG grounds answers.",
-    "key_findings": ["RAG reduces unsupported answers"], "conflicts": [], "errors": [],
+    "key_findings": ["RAG reduces unsupported answers"], "conflicts": [],
+    "errors": ["Analysis failed: Gemini service error (503)."],
 }
 REPORT = {
-    "session_id": "s1", "title": "Benefits and Limitations of RAG", "markdown": "# Benefits and Limitations of RAG\n\nBody [W1].",
-    "report": {}, "quality_notes": [], "created_at": NOW,
-    "citations": [{"id": "W1", "title": "RAG survey", "reference": "https://example.org", "source_type": "web",
-                   "verification_status": "corroborated", "excerpt": ""}],
+    "session_id": "s1", "title": "Benefits and Limitations of RAG",
+    "markdown": "# Benefits and Limitations of RAG\n\n## Executive Summary\n\nBody [W1].",
+    "report": {"executive_summary": "RAG grounds answers in retrieved text [W1].",
+               "key_findings": ["Fewer unsupported answers [W1]", "Retrieval quality matters [K1]"]},
+    "quality_notes": ["1 of 2 cited sources are not corroborated by a second source."], "created_at": NOW,
+    "citations": [
+        {"id": "W1", "title": "RAG survey", "reference": "https://example.org/rag", "source_type": "web",
+         "verification_status": "corroborated", "excerpt": ""},
+        {"id": "K1", "title": "team_notes.md", "reference": "team_notes.md", "source_type": "knowledge_base",
+         "verification_status": "single_source", "excerpt": ""},
+    ],
 }
+DOCS = [
+    {"id": "d1", "filename": "notes.pdf", "content_type": "application/pdf", "size_bytes": 2048, "chunk_count": 7,
+     "status": "processed", "error": None, "created_at": NOW},
+    {"id": "d2", "filename": "scan.pdf", "content_type": "application/pdf", "size_bytes": 4096, "chunk_count": 0,
+     "status": "failed", "error": "No usable text could be extracted.", "created_at": NOW},
+]
 
 
 class FakeClient:
@@ -90,12 +108,14 @@ class FakeClient:
 
 def run_page(page: str, fake: FakeClient, active_session: str | None = None) -> AppTest:
     def script(page_name: str) -> None:
+        from frontend.ui.theme import inject_theme
         from frontend.views import history, knowledge_base, new_research, settings_page
 
+        inject_theme()
         {"research": new_research, "history": history, "knowledge": knowledge_base,
          "settings": settings_page}[page_name].render()
 
-    app = AppTest.from_function(script, args=(page,), default_timeout=90)  # first run may load pyarrow natively (slow on cold Windows)
+    app = AppTest.from_function(script, args=(page,), default_timeout=TIMEOUT)
     app.session_state["api_client"] = fake
     if active_session:
         app.session_state["active_session_id"] = active_session
@@ -113,180 +133,277 @@ def button(app: AppTest, label: str):
     return next(b for b in app.button if b.label == label)
 
 
+def labels(app: AppTest) -> set[str]:
+    return {b.label for b in app.button}
+
+
 # --------------------------------------------------------------------------- new research
 
 
-def test_start_form_renders_user_facing_content() -> None:
+def test_landing_explains_the_product_within_seconds() -> None:
     app = run_page("research", FakeClient())
     assert not app.exception
     page = texts(app)
-    assert "ResearchPilot" in page and "Multi-Agent AI Research" in page
-    assert len(app.text_area) == 2 and "pauses for your review" in page and "How it works" in page
-    assert "web searches" not in page and "gemini" not in page.lower()  # no technical limits on the main page
+    for expected in ("ResearchPilot", "Multi-Agent AI Research", "Report Generation", "System Ready",
+                     "What would you like to research?", "How ResearchPilot works", "8 specialised agents",
+                     "LangGraph"):
+        assert expected in page, expected
+    for step in ("01", "Plan", "02", "Research", "03", "Verify", "04", "Review", "05", "Report"):
+        assert step in page
+    assert "Start Research →" in labels(app)
+    assert "gemini" not in page.lower() and "web searches" not in page  # no technical limits
 
 
-def test_start_requires_a_topic_then_starts_research() -> None:
+def test_composer_requires_a_topic_then_starts_research() -> None:
     fake = FakeClient(research=session("running", id="new1"))
     app = run_page("research", fake)
-    button(app, "Start Research").click().run()
+    button(app, "Start Research →").click().run()
     assert "at least 3 characters" in texts(app) and not fake.called("start_research")
 
-    app.text_area[0].input("What are the benefits of RAG?")
-    app.text_area[1].input("Focus on enterprises")
-    button(app, "Start Research").click().run()
+    app.text_area(key="composer_query").input("What are the benefits of RAG?")
+    app.text_area(key="composer_instructions").input("Focus on enterprises")
+    button(app, "Start Research →").click().run()
     assert fake.called("start_research") == [("start_research", "What are the benefits of RAG?", "Focus on enterprises")]
     assert app.session_state["active_session_id"] == "new1"
+    assert "composer_query" not in app.session_state  # composer cleared for the next research
 
 
-def test_research_disabled_without_gemini_key() -> None:
+def test_research_disabled_without_ai_service() -> None:
     app = run_page("research", FakeClient(config=CONFIG | {"research_enabled": False}))
     assert "AI service isn't configured" in texts(app) and "GEMINI_API_KEY" not in texts(app)
-    assert button(app, "Start Research").disabled
+    assert button(app, "Start Research →").disabled
+    assert "Limited Mode" in texts(app)
 
 
-def test_running_session_shows_live_stages() -> None:
+# --------------------------------------------------------------------------- research session
+
+
+def test_running_session_shows_agent_workflow_timeline() -> None:
     fake = FakeClient(research=session("running", pending_nodes=["source_verification"]))
     app = run_page("research", fake, active_session="s1")
     assert not app.exception
     page = texts(app)
-    assert "agents are working" in page and "Source Verification" in page and "In progress" in page
-    assert app.metric and fake.called("get_research")
+    assert "Research in progress" in page and "Agent working..." in page and "Agent workflow" in page
+    assert "rp-tl-item active" in page and "Source Verification" in page
+    assert page.count("rp-tl-item done") == 3 and page.count("rp-tl-item pending") == 6
+    assert "Cross-checking sources" in page  # active step explained in plain language
 
 
-def test_approval_panel_approve_modify_cancel() -> None:
-    fake = FakeClient(research=session("awaiting_approval", pending_nodes=["human_review"],
-                                       approval_request=APPROVAL))
+def test_approval_is_a_clear_decision_point() -> None:
+    fake = FakeClient(research=session("awaiting_approval", pending_nodes=["human_review"], approval_request=APPROVAL))
     app = run_page("research", fake, active_session="s1")
     page = texts(app)
-    assert "Review the research before the report is written" in page and "RAG reduces unsupported answers" in page
-    assert "What are its limitations?" in page
+    assert "Your Review Is Needed" in page and "ready to generate the final report" in page
+    assert "Sources found" in page and "RAG reduces unsupported answers" in page and "What are its limitations?" in page
+    assert "Some steps completed with limitations" in page
+    assert "503" not in page and "503" in app.code[0].value  # raw errors only inside "Technical details"
+    assert {"Approve & Generate Report", "Modify Research", "Cancel"} <= labels(app)
 
-    button(app, "Generate Final Report").click().run()
+    button(app, "Approve & Generate Report").click().run()
     assert fake.called("decide")[-1] == ("decide", "s1", "approve", None)
+    button(app, "Cancel").click().run()
+    assert fake.called("decide")[-1] == ("decide", "s1", "cancel", None)
 
+
+def test_modify_research_panel() -> None:
+    fake = FakeClient(research=session("awaiting_approval", pending_nodes=["human_review"], approval_request=APPROVAL))
+    app = run_page("research", fake, active_session="s1")
+    assert "Run another research iteration" not in labels(app)
+    button(app, "Modify Research").click().run()
     button(app, "Run another research iteration").click().run()
     assert "Please describe what should change." in texts(app)
-    next(t for t in app.text_area if t.key == "modify_feedback").input("Add cost data")
+    app.text_area(key="modify_feedback").input("Add cost data")
     button(app, "Run another research iteration").click().run()
     assert fake.called("decide")[-1] == ("decide", "s1", "modify", "Add cost data")
-
-    button(app, "Cancel research").click().run()
-    assert fake.called("decide")[-1] == ("decide", "s1", "cancel", None)
 
 
 def test_modify_disabled_at_iteration_limit() -> None:
     fake = FakeClient(research=session("awaiting_approval", pending_nodes=["human_review"],
                                        approval_request=APPROVAL | {"can_modify": False}))
     app = run_page("research", fake, active_session="s1")
+    button(app, "Modify Research").click().run()
     assert button(app, "Run another research iteration").disabled
     assert "maximum number of times" in texts(app)
 
 
-def test_completed_session_shows_report_sources_and_pdf() -> None:
+def completed_app() -> tuple[AppTest, FakeClient]:
     fake = FakeClient(research=session("completed", title="Benefits and Limitations of RAG",
                                        events=[event(n) for n in ("planner", "web_research", "source_verification",
                                                                   "analysis", "human_review", "writer", "critic",
                                                                   "finalize")]))
-    app = run_page("research", fake, active_session="s1")
+    return run_page("research", fake, active_session="s1"), fake
+
+
+def test_completed_report_feels_finished() -> None:
+    app, fake = completed_app()
     assert not app.exception
-    assert "Body [W1]." in texts(app)
-    assert not any(m.value.lstrip().startswith("# ") for m in app.markdown)  # title not repeated in the body
+    page = texts(app)
+    assert "Research Complete ✓" in page and "Benefits and Limitations of RAG" in page and "2 cited sources" in page
+    assert "Executive Summary" in page and "RAG grounds answers in retrieved text" in page
+    assert "Key Findings" in page and "Retrieval quality matters" in page
+    assert {"View Report", "Back to History", "New Research"} <= labels(app)
+    assert app.get("download_button")  # PDF download
     assert fake.called("get_report") and fake.called("get_report_pdf")
-    assert app.get("download_button")  # PDF download offered
-    assert app.dataframe  # sources table
 
 
-def test_stopped_session_offers_retry() -> None:
+def test_view_report_and_sources() -> None:
+    app, _ = completed_app()
+    button(app, "View Report").click().run()
+    assert app.session_state["view:s1"] == "Full report"
+    assert "Body [W1]." in texts(app)
+    assert not any(m.value.lstrip().startswith("# ") for m in app.markdown)  # title not repeated
+
+    app.session_state["view:s1"] = "Sources"
+    app.run()
+    page = texts(app)
+    assert "RAG survey" in page and "Corroborated" in page and "Single source" in page
+    assert "https://example.org/rag" in page
+
+
+def test_stopped_session_explains_and_offers_retry() -> None:
     fake = FakeClient(research=session("interrupted", retryable=True, pending_nodes=["writer"],
-                                       error="Gemini service error (503)."))
+                                       error="Gemini: report writing failed: Gemini service error (503)."))
     app = run_page("research", fake, active_session="s1")
-    assert "stopped before finishing" in texts(app) and "503" in texts(app)
-    button(app, "Retry from last checkpoint").click().run()
+    page = texts(app)
+    assert "What happened?" in page and "Stopped at Report Generation" in page
+    assert "safely saved" in page and "retry from the last checkpoint" in page
+    assert "503" not in page and "503" in app.code[0].value  # raw error only in Technical details
+    button(app, "Retry from checkpoint").click().run()
     assert fake.called("retry") == [("retry", "s1")]
 
 
 def test_non_retryable_failure_has_no_retry_button() -> None:
     app = run_page("research", FakeClient(research=session("failed", error="No sources found.")), active_session="s1")
-    assert "No sources found." in texts(app)
-    assert not any(b.label == "Retry from last checkpoint" for b in app.button)
+    assert "be completed. Try rephrasing the question" in texts(app)
+    assert "Retry from checkpoint" not in labels(app)
+    assert "No sources found." in app.code[0].value
 
 
 def test_cancelled_session_message() -> None:
     app = run_page("research", FakeClient(research=session("cancelled")), active_session="s1")
-    assert "cancelled" in texts(app)
+    assert "This research was cancelled" in texts(app)
 
 
 def test_new_research_button_clears_active_session() -> None:
     app = run_page("research", FakeClient(research=session("cancelled")), active_session="s1")
-    button(app, "New research").click().run()
+    button(app, "New Research").click().run()
     assert app.session_state["active_session_id"] is None
 
 
-# --------------------------------------------------------------------------- other pages
+# --------------------------------------------------------------------------- history
 
 
-@pytest.mark.parametrize(
-    ("page", "message"),
-    [("history", "No research yet"), ("knowledge", "No documents yet")],
-)
-def test_empty_states(page: str, message: str) -> None:
-    app = run_page(page, FakeClient())
-    assert not app.exception and message in texts(app)
+def test_history_empty_state_starts_new_research() -> None:
+    app = run_page("history", FakeClient())
+    assert not app.exception
+    assert "Your research history is empty" in texts(app) and "Start your first research task" in texts(app)
+    app.session_state["active_session_id"] = "old"
+    button(app, "Start New Research").click().run()
+    assert app.session_state["active_session_id"] is None
 
 
-def test_history_lists_sessions() -> None:
+def test_history_shows_research_cards() -> None:
+    rows = [session("completed", id="a", title="Report A"),
+            session("awaiting_approval", id="b"), session("failed", id="c")]
+    app = run_page("history", FakeClient(research=session("completed"), list_research=rows))
+    assert not app.exception
+    page = texts(app)
+    assert "Total research" in page and "Waiting for approval" in page
+    assert "Report A" in page and "Findings are ready for your review." in page
+    assert "Completed" in page and "Waiting for Approval" in page and "Failed" in page
+    assert "10 sources" in page and "1 revision" in page
+    assert [b.label for b in app.button].count("Open Research") == 3
+
+
+def test_history_open_and_delete() -> None:
     rows = [session("completed", id="a", title="Report A"), session("failed", id="b")]
-    app = run_page("history", FakeClient(list_research=rows))
-    assert app.dataframe and "2 research sessions" in texts(app)
+    fake = FakeClient(research=session("completed"), list_research=rows)
+    app = run_page("history", fake)
+    app.button(key="confirm_delete_b").click().run()
+    assert fake.called("delete_research") == [("delete_research", "b")]
+    app.button(key="open_a").click().run()
+    assert app.session_state["active_session_id"] == "a"
 
 
-def test_knowledge_base_lists_documents() -> None:
-    docs = [{"id": "d1", "filename": "notes.pdf", "content_type": "application/pdf", "size_bytes": 2048,
-             "chunk_count": 7, "status": "processed", "error": None, "created_at": NOW}]
-    app = run_page("knowledge", FakeClient(list_documents=docs))
-    assert app.dataframe and "1 document." in texts(app)
+# --------------------------------------------------------------------------- knowledge base
 
 
-def test_settings_is_a_user_facing_overview() -> None:
-    docs = [{"id": "d1", "filename": "a.pdf", "content_type": "application/pdf", "size_bytes": 1, "chunk_count": 7,
-             "status": "processed", "error": None, "created_at": NOW},
-            {"id": "d2", "filename": "b.pdf", "content_type": "application/pdf", "size_bytes": 1, "chunk_count": 0,
-             "status": "failed", "error": "No text", "created_at": NOW}]
-    fake = FakeClient(list_documents=docs)
+def test_knowledge_base_empty_state() -> None:
+    app = run_page("knowledge", FakeClient())
+    assert "No documents yet" in texts(app)
+    assert button(app, "Add to Knowledge Base").disabled  # nothing selected yet
+
+
+def test_knowledge_base_document_cards() -> None:
+    fake = FakeClient(list_documents=DOCS)
+    app = run_page("knowledge", fake)
+    assert not app.exception
+    page = texts(app)
+    assert "notes.pdf" in page and "scan.pdf" in page and "Ready" in page and "Needs attention" in page
+    assert "Searchable passages" in page and "7 passages" in page
+    assert "chroma" not in page.lower() and "embedding" not in page.lower()
+    assert not any(b.key == "proc_d1" for b in app.button)  # only unprocessed docs can be re-processed
+    app.button(key="proc_d2").click().run()
+    assert fake.called("process_document") == [("process_document", "d2")]
+    app.button(key="del_d1").click().run()
+    assert fake.called("delete_document") == [("delete_document", "d1")]
+
+
+# --------------------------------------------------------------------------- settings
+
+
+def test_settings_is_user_facing() -> None:
+    fake = FakeClient(list_documents=DOCS)
     app = run_page("settings", fake)
     assert not app.exception
     page = texts(app)
-    assert "All systems operational" in page and "Gemini 3.5 Flash" in page
-    assert "1 document ready" in page and "7 searchable passages" in page and "1 document needs attention" in page
-    assert "About ResearchPilot" in page
-    for technical in ("requests / minute", "Tool-calling", "Chunk", "Minimum relevance", "Max upload",
-                      "Database", "API key", "Tavily key", "Critic revisions", "Research iterations"):
+    for expected in ("AI Model", "Gemini 3.5 Flash", "Knowledge Base", "1 document available to search",
+                     "System Status", "All research features are available", "About ResearchPilot",
+                     "Multi-agent AI research and report generation system.", "Version 1.0"):
+        assert expected in page, expected
+    for technical in TECHNICAL_TERMS:
         assert technical.lower() not in page.lower(), technical
     assert not any(b.label in ("Test with one request", "Check availability") for b in app.button)
     assert not fake.called("model_check")  # never spends Gemini quota
 
 
-def test_settings_reports_limited_features_simply() -> None:
-    app = run_page("settings", FakeClient(config=CONFIG | {"web_research_enabled": False}))
-    assert "web search is unavailable" in texts(app)
-    app = run_page("settings", FakeClient(config=CONFIG | {"research_enabled": False}))
-    assert any("Research is unavailable" in e.value for e in app.error)
+@pytest.mark.parametrize("config", [CONFIG | {"web_research_enabled": False}, CONFIG | {"research_enabled": False}])
+def test_settings_status_is_simple(config: dict) -> None:
+    assert "Limited mode" in texts(run_page("settings", FakeClient(config=config)))
 
 
-@pytest.mark.parametrize("page", ["research", "history", "knowledge", "settings"])
+def test_settings_offline_does_not_crash() -> None:
+    app = run_page("settings", FakeClient(offline=True))
+    assert not app.exception and "Offline" in texts(app)
+
+
+# --------------------------------------------------------------------------- whole app & offline
+
+
+@pytest.mark.parametrize("page", ["research", "history", "knowledge"])
 def test_backend_offline_shows_friendly_error(page: str) -> None:
     app = run_page(page, FakeClient(offline=True), active_session="s1" if page == "research" else None)
     assert not app.exception
-    assert any("Cannot reach the ResearchPilot backend" in e.value for e in app.error)
+    assert any("research service isn't reachable" in e.value or "Cannot reach the ResearchPilot backend" in e.value
+               for e in app.error)
 
 
-def test_full_app_boots_with_navigation_and_sidebar_status() -> None:
-    app = AppTest.from_file(APP_FILE, default_timeout=90)  # first run may load pyarrow natively (slow on cold Windows)
+def test_full_app_boots_with_navigation_and_status_card() -> None:
+    app = AppTest.from_file(APP_FILE, default_timeout=TIMEOUT)
     app.session_state["api_client"] = FakeClient()
     app.run()
     assert not app.exception
     assert "ResearchPilot" in texts(app)
-    assert any("Online" in m.value for m in app.sidebar.markdown)  # simple status badge
+    sidebar = "\n".join(m.value for m in app.sidebar.markdown)
+    assert "System Ready" in sidebar and "AI research workspace is online" in sidebar
+
+
+def test_full_app_shows_offline_status() -> None:
+    app = AppTest.from_file(APP_FILE, default_timeout=TIMEOUT)
+    app.session_state["api_client"] = FakeClient(offline=True)
+    app.run()
+    assert not app.exception
+    assert "Offline" in "\n".join(m.value for m in app.sidebar.markdown)
 
 
 def test_timestamps_are_shown_in_local_time_and_counts_pluralised() -> None:
@@ -299,3 +416,13 @@ def test_timestamps_are_shown_in_local_time_and_counts_pluralised() -> None:
     assert local_time("2026-10-02T18:30:00+00:00") == expected
     assert local_time("not a date") == "not a date"
     assert plural(1, "passage") == "1 passage" and plural(7, "passage") == "7 passages"
+
+
+def test_user_text_is_escaped_in_html_components() -> None:
+    from frontend.ui.components import research_card_html, source_item_html
+
+    card = research_card_html("<script>x</script>", "a & b", "today", "completed", 1, 0)
+    assert "<script>" not in card and "&lt;script&gt;" in card and "a &amp; b" in card
+    source = source_item_html({"id": "W1", "title": "<b>t</b>", "reference": "javascript:alert(1)",
+                               "source_type": "web", "verification_status": "unverified"})
+    assert "<b>t</b>" not in source and "href" not in source  # non-http references are not links

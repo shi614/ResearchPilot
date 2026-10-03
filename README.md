@@ -219,7 +219,7 @@ python run.py frontend     # Streamlit UI at http://localhost:8501
 
 Verify your Gemini setup (one tiny request):
 `GET http://127.0.0.1:8000/health/models?probe=true`. If the model is unavailable, the
-response suggests compatible Flash models. The app's **Settings & About** page shows the
+response suggests compatible Flash models. The app's **Settings** page shows the
 active model, knowledge-base status and overall system status.
 
 Terminal mode (no UI):
@@ -235,19 +235,19 @@ python run.py research --retry <run_id>     # continue a stopped run
 
 1. **Knowledge Base** → upload `internal_notes.pdf`. It is chunked, embedded and indexed.
 2. **New Research** → *"What are the main benefits and limitations of Retrieval-Augmented
-   Generation?"* → **Start Research**.
+   Generation?"* → **Start Research →**.
 3. Watch the stages update live: *Planning → Web Research ∥ Knowledge Retrieval → Source
    Verification → Analysis*. The activity log shows each agent's result (e.g. "3 web
    searches, 14 new sources", "1 relevant chunk from 1 document").
-4. The run pauses at **Your Approval** with source counts, research questions and key findings:
-   - **Generate Final Report** → writer → critic → (revision) → finalize
+4. The run pauses at **Your Review Is Needed** with source counts, research questions and key findings:
+   - **Approve & Generate Report** → writer → critic → (revision) → finalize
    - **Modify Research** → e.g. *"Add evidence on cost and latency"* → the planner re-plans
      and only new queries are searched
-   - **Cancel research**
-5. Read the report in the UI, check the **Sources** tab (each with its verification label),
+   - **Cancel**
+5. Read the **Overview** or **Full report**, check the **Sources** view (each with its verification label),
    and **Download PDF**.
 6. Reopen any run later from **Research History**. If a run stopped (quota, outage, restart),
-   open it and click **Retry from last checkpoint**.
+   open it and click **Retry from checkpoint**.
 
 **Typical cost per run:** ~7–10 Gemini calls, ≤ 3 Tavily credits (basic search), and a few
 embedding requests — well within free-tier limits.

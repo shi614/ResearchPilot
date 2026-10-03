@@ -1,85 +1,104 @@
-"""Knowledge base: upload, view, (re)process and delete documents used by the RAG agent."""
+"""Knowledge Base: a document workspace (upload, view, re-process, delete) for the RAG agent."""
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import streamlit as st
 
-from frontend.components import call, client, local_time, page_header, plural
+from frontend.components import call, client, local_time, plural
+from frontend.ui.components import (
+    document_row_html,
+    empty_state,
+    html_block,
+    metric_row,
+    page_header,
+    section_header,
+    tone_badge,
+)
 
-STATUS_LABELS = {"processed": "Ready", "uploaded": "Not processed yet", "failed": "Needs attention"}
+STATUS = {"processed": ("Ready", "success"), "uploaded": ("Not processed", "neutral"),
+          "failed": ("Needs attention", "danger")}
 
 
 def render() -> None:
-    page_header(
-        "Knowledge Base",
-        "Add your own documents so the agents can search and cite them alongside the web.",
-    )
-    _upload_section()
-    st.divider()
-    _documents_section()
+    page_header("Knowledge Base", "Upload documents that ResearchPilot can use as private research context.")
+    st.write("")
+    _upload_card()
+    st.write("")
+    _documents()
 
 
-def _upload_section() -> None:
-    with st.form("upload_documents", clear_on_submit=True, border=True):
-        files = st.file_uploader("Upload PDF, TXT or Markdown files", type=["pdf", "txt", "md", "markdown"],
-                                 accept_multiple_files=True)
-        submitted = st.form_submit_button("Add documents", type="primary", icon=":material/upload:")
-    if submitted:
-        if not files:
-            st.warning("Choose at least one file.")
-            return
+def _upload_card() -> None:
+    with st.container(key="card_upload"):
+        section_header("Add documents", "The agents search and cite these alongside the web.")
+        files = st.file_uploader("Upload PDF, TXT or Markdown", type=["pdf", "txt", "md", "markdown"],
+                                 accept_multiple_files=True, key="kb_files")
+        add = st.button("Add to Knowledge Base", type="primary", icon=":material/upload:", key="kb_add",
+                        disabled=not files)
+    if add and files:
         for file in files:
             with st.spinner(f"Adding {file.name}... this can take a moment for large files."):
                 document = call(lambda f=file: client().upload_document(f.name, f.getvalue()),
-                                failure=f"Could not upload {file.name}")
+                                failure=f"Could not add {file.name}")
             if document is None:
                 continue
             if document["status"] == "processed":
-                st.success(f"{file.name} is ready ({plural(document['chunk_count'], 'searchable passage')}).",
-                           icon=":material/check:")
+                st.toast(f"{file.name} is ready", icon=":material/check_circle:")
             else:
-                st.warning(f"{file.name} was saved but could not be read: {document['error']}",
+                st.warning(f"{file.name} was saved but could not be read. {document.get('error') or ''}",
                            icon=":material/warning:")
+        st.session_state.pop("kb_files", None)
+        st.rerun()
 
 
-def _documents_section() -> None:
-    st.subheader("Your documents", anchor=False)
+def _documents() -> None:
     documents = call(lambda: client().list_documents(), failure="Could not load documents")
     if documents is None:
         return
     if not documents:
-        st.info("No documents yet. Until you add some, research uses web sources only.",
-                icon=":material/folder_open:")
+        empty_state("folder_open", "No documents yet",
+                    "Upload PDFs, notes or reports so the agents can cite your own material. "
+                    "Until then, research uses web sources only.")
         return
 
-    rows = [
-        {
-            "File": d["filename"],
-            "Status": STATUS_LABELS.get(d["status"], d["status"]),
-            "Passages": d["chunk_count"],
-            "Size (KB)": round(d["size_bytes"] / 1024, 1),
-            "Uploaded": local_time(d["created_at"]),
-            "Notes": d.get("error") or "",
-        }
-        for d in documents
-    ]
-    selection = st.dataframe(rows, hide_index=True, width="stretch", on_select="rerun",
-                             selection_mode="single-row", key="documents_table")
-    selected = selection.selection.rows if selection else []
-    if not selected:
-        st.caption(f"{plural(len(documents), 'document')}. Select one to re-process or delete it.")
-        return
+    ready = [d for d in documents if d["status"] == "processed"]
+    metric_row([
+        ("Documents", len(documents), "description"),
+        ("Ready to search", len(ready), "task_alt"),
+        ("Searchable passages", sum(d["chunk_count"] for d in ready), "segment"),
+    ])
+    st.write("")
+    section_header("Your documents")
+    st.write("")
+    for document in documents:
+        _document_card(document)
 
-    document = documents[selected[0]]
-    with st.container(border=True):
-        st.markdown(f"**{document['filename']}**")
-        process_col, delete_col, _ = st.columns([2, 2, 3])
-        if process_col.button("Re-process", icon=":material/refresh:", width="stretch", key="reprocess"):
-            with st.spinner("Re-processing..."):
-                result = call(lambda: client().process_document(document["id"]), failure="Could not process")
-            if result:
-                st.rerun()
-        if delete_col.button("Delete", icon=":material/delete:", width="stretch", key="delete_doc"):
-            if call(lambda: client().delete_document(document["id"]) or True, failure="Could not delete"):
-                st.toast(f"Deleted {document['filename']}", icon=":material/delete:")
-                st.rerun()
+
+def _document_card(document: dict[str, Any]) -> None:
+    doc_id = document["id"]
+    kind = Path(document["filename"]).suffix.lstrip(".").upper()[:4] or "DOC"
+    label, tone = STATUS.get(document["status"], (document["status"], "neutral"))
+    meta = (f"{kind} · {plural(document['chunk_count'], 'passage')} · {round(document['size_bytes'] / 1024, 1)} KB"
+            f" · Uploaded {local_time(document['created_at'])}")
+    with st.container(key=f"card_doc_{doc_id}"):
+        info, status, actions = st.columns([5, 1.6, 2.2], vertical_alignment="center")
+        with info:
+            html_block(document_row_html(document["filename"], kind, meta))
+        with status:
+            html_block(tone_badge(label, tone))
+        with actions:
+            process_col, delete_col = st.columns(2)
+            if document["status"] != "processed":
+                if process_col.button("Re-process", icon=":material/refresh:", width="stretch", key=f"proc_{doc_id}"):
+                    with st.spinner("Re-processing..."):
+                        if call(lambda: client().process_document(doc_id), failure="Could not process"):
+                            st.rerun()
+            with delete_col, st.container(key=f"danger_doc_{doc_id}"):
+                if st.button("Delete", icon=":material/delete:", width="stretch", key=f"del_{doc_id}"):
+                    if call(lambda: client().delete_document(doc_id) or True, failure="Could not delete"):
+                        st.toast(f"Deleted {document['filename']}", icon=":material/delete:")
+                        st.rerun()
+        if document.get("error"):
+            st.caption(f":material/info: {document['error']}")
