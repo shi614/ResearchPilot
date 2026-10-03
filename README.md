@@ -239,14 +239,14 @@ python run.py research --retry <run_id>     # continue a stopped run
 3. Watch the stages update live: *Planning → Web Research ∥ Knowledge Retrieval → Source
    Verification → Analysis*. The activity log shows each agent's result (e.g. "3 web
    searches, 14 new sources", "1 relevant chunk from 1 document").
-4. The run pauses at **Your Review Is Needed** with source counts, research questions and key findings:
-   - **Approve & Generate Report** → writer → critic → (revision) → finalize
-   - **Modify Research** → e.g. *"Add evidence on cost and latency"* → the planner re-plans
+4. The run pauses at **Review Before Report Generation** (the human-in-the-loop checkpoint) with source counts, research questions and key findings:
+   - **Approve & Continue** → writer → critic → (revision) → finalize
+   - **Request Changes** → e.g. *"Add evidence on cost and latency"* → the planner re-plans
      and only new queries are searched
    - **Cancel**
-5. Read the **Overview** or **Full report**, check the **Sources** view (each with its verification label),
+5. Read the **Research Report**, use **View Sources** (each with its verification label),
    and **Download PDF**.
-6. Reopen any run later from **Research History**. If a run stopped (quota, outage, restart),
+6. Reopen any run later from **History**. If a run stopped (quota, outage, restart),
    open it and click **Retry from checkpoint**.
 
 **Typical cost per run:** ~7–10 Gemini calls, ≤ 3 Tavily credits (basic search), and a few

@@ -1,12 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="250" height="56" viewBox="0 0 250 56" role="img" aria-label="ResearchPilot - AI Research Workspace">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/>
-    </linearGradient>
-  </defs>
-  <rect x="2" y="6" width="44" height="44" rx="12" fill="url(#g)"/>
-  <circle cx="24" cy="28" r="12" fill="none" stroke="#ffffff" stroke-width="2.6"/>
-  <path d="M30 22 L26.1 30.1 L18 34 L21.9 25.9 Z" fill="#ffffff"/>
-  <text x="58" y="27" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="21" font-weight="750" fill="#0f1b3d">Research<tspan fill="#4f46e5">Pilot</tspan></text>
-  <text x="58" y="45" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#5f6b85">AI Research Workspace</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="270" height="56" viewBox="0 0 270 56" role="img" aria-label="ResearchPilot - Multi-Agent Research Workspace">
+  <rect x="2" y="7" width="42" height="42" rx="10" fill="#167D8D"/>
+  <circle cx="23" cy="28" r="11.5" fill="none" stroke="#FFFFFF" stroke-width="2.4"/>
+  <path d="M28.6 22.4 L25 30 L17.4 33.6 L21 26 Z" fill="#FFFFFF"/>
+  <circle cx="23" cy="28" r="1.8" fill="#D6A84F"/>
+  <text x="56" y="27" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="20.5" font-weight="750" fill="#172033">ResearchPilot</text>
+  <text x="56" y="45" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="12" font-weight="500" fill="#667085">Multi-Agent Research Workspace</text>
 </svg>

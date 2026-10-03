@@ -23,7 +23,7 @@ STATUS_DESCRIPTIONS = {
 
 
 def render() -> None:
-    page_header("Research History", "Revisit earlier research, continue paused runs or download reports.")
+    page_header("History", "Revisit earlier research, continue paused runs or download reports.")
     st.write("")
     sessions = call(lambda: client().list_research(), failure="Could not load research history")
     if sessions is None:
@@ -81,8 +81,8 @@ def _research_card(session: dict[str, Any]) -> None:
         st.write("")
         open_col, delete_col = st.columns([2.2, 1])
         primary = session["status"] in ("awaiting_approval", "interrupted", "quota_exhausted")
-        if open_col.button("Open Research", icon=":material/arrow_forward:", width="stretch",
-                           key=f"open_{session_id}", type="primary" if primary else "secondary"):
+        if open_col.button("Open Research →", width="stretch", key=f"open_{session_id}",
+                           type="primary" if primary else "secondary"):
             open_session(session_id)
             go_to("research")
         with delete_col, st.container(key=f"danger_delete_{session_id}"):

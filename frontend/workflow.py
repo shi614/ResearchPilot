@@ -12,16 +12,16 @@ from typing import Any, Literal
 StageState = Literal["done", "active", "waiting", "warning", "failed", "skipped", "pending"]
 
 STAGES: list[tuple[str, str]] = [
-    ("planner", "Planning"),
+    ("planner", "Planner"),
     ("web_research", "Web Research"),
     ("rag_research", "Knowledge Retrieval"),
     ("source_verification", "Source Verification"),
     ("analysis", "Analysis"),
-    ("human_review", "Your Approval"),
+    ("human_review", "Human Approval"),
     ("writer", "Report Generation"),
-    ("critic", "Fact Checking"),
+    ("critic", "Quality Review"),
     ("revision", "Revision"),
-    ("finalize", "Finalization"),
+    ("finalize", "Final Report"),
 ]
 STAGE_INDEX = {node: i for i, (node, _) in enumerate(STAGES)}
 

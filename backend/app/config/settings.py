@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # --- API keys (optional at startup so the app can report what's missing) ---
     gemini_api_key: SecretStr | None = None
     tavily_api_key: SecretStr | None = None
+    # Optional pool of Gemini keys to rotate through when one hits its daily quota,
+    # e.g. GEMINI_API_KEYS=key1,key2,key3. Falls back to GEMINI_API_KEY alone when unset.
+    gemini_api_keys: SecretStr | None = None
 
     # --- Gemini (free-tier Flash by default) ---
     gemini_model: str = "gemini-3.5-flash"
@@ -72,7 +75,7 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, ge=1, le=65535)
     backend_url: str = "http://127.0.0.1:8000"
 
-    @field_validator("gemini_api_key", "tavily_api_key", mode="before")
+    @field_validator("gemini_api_key", "tavily_api_key", "gemini_api_keys", mode="before")
     @classmethod
     def _blank_key_is_none(cls, value: object) -> object:
         """Treat empty values (e.g. `GEMINI_API_KEY=` in .env) as not set."""
@@ -115,10 +118,23 @@ class Settings(BaseSettings):
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
 
+    @property
+    def gemini_keys(self) -> list[str]:
+        """All configured Gemini keys, for rotation.
+
+        `GEMINI_API_KEYS=key1,key2,key3` takes precedence when set; otherwise
+        falls back to the single `GEMINI_API_KEY`. Blank entries are dropped.
+        """
+        if self.gemini_api_keys is not None:
+            keys = [k.strip() for k in self.gemini_api_keys.get_secret_value().split(",") if k.strip()]
+            if keys:
+                return keys
+        return [self.gemini_api_key.get_secret_value()] if self.gemini_api_key else []
+
     def missing_required_keys(self) -> list[str]:
         """Names of required API keys that are not configured."""
         missing: list[str] = []
-        if self.gemini_api_key is None:
+        if not self.gemini_keys:
             missing.append("GEMINI_API_KEY")
         if self.tavily_api_key is None:
             missing.append("TAVILY_API_KEY")

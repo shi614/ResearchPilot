@@ -144,12 +144,15 @@ def test_landing_explains_the_product_within_seconds() -> None:
     app = run_page("research", FakeClient())
     assert not app.exception
     page = texts(app)
-    for expected in ("ResearchPilot", "Multi-Agent AI Research", "Report Generation", "System Ready",
-                     "What would you like to research?", "How ResearchPilot works", "8 specialised agents",
-                     "LangGraph"):
+    for expected in ("Research smarter. Discover faster.", "Multi-Agent Research Workspace", "System Operational",
+                     "web research, knowledge retrieval, source verification",
+                     "Everything you need for reliable research", "Web Research", "Knowledge Retrieval",
+                     "Source Verification", "AI Report Generation", "How ResearchPilot works", "LangGraph"):
         assert expected in page, expected
-    for step in ("01", "Plan", "02", "Research", "03", "Verify", "04", "Review", "05", "Report"):
-        assert step in page
+    for step in ("Research Query", "Planning", "Web + Knowledge Research", "Analysis", "Human Approval",
+                 "Report Generation", "Quality Review", "Final Report", "Planner agent", "Critic + Reviser", "09"):
+        assert step in page, step  # the multi-agent workflow, including the human checkpoint
+    assert app.text_area(key="composer_query").label == "What would you like to research?"
     assert "Start Research →" in labels(app)
     assert "gemini" not in page.lower() and "web searches" not in page  # no technical limits
 
@@ -193,13 +196,15 @@ def test_approval_is_a_clear_decision_point() -> None:
     fake = FakeClient(research=session("awaiting_approval", pending_nodes=["human_review"], approval_request=APPROVAL))
     app = run_page("research", fake, active_session="s1")
     page = texts(app)
-    assert "Your Review Is Needed" in page and "ready to generate the final report" in page
-    assert "Sources found" in page and "RAG reduces unsupported answers" in page and "What are its limitations?" in page
+    assert "Review Before Report Generation" in page and "Human-in-the-loop checkpoint" in page
+    assert "before ResearchPilot writes the final report" in page and "Research summary" in page
+    assert "Important findings" in page and "Knowledge base" in page
+    assert "RAG reduces unsupported answers" in page and "What are its limitations?" in page
     assert "Some steps completed with limitations" in page
     assert "503" not in page and "503" in app.code[0].value  # raw errors only inside "Technical details"
-    assert {"Approve & Generate Report", "Modify Research", "Cancel"} <= labels(app)
+    assert {"Approve & Continue", "Request Changes", "Cancel"} <= labels(app)
 
-    button(app, "Approve & Generate Report").click().run()
+    button(app, "Approve & Continue").click().run()
     assert fake.called("decide")[-1] == ("decide", "s1", "approve", None)
     button(app, "Cancel").click().run()
     assert fake.called("decide")[-1] == ("decide", "s1", "cancel", None)
@@ -209,7 +214,7 @@ def test_modify_research_panel() -> None:
     fake = FakeClient(research=session("awaiting_approval", pending_nodes=["human_review"], approval_request=APPROVAL))
     app = run_page("research", fake, active_session="s1")
     assert "Run another research iteration" not in labels(app)
-    button(app, "Modify Research").click().run()
+    button(app, "Request Changes").click().run()
     button(app, "Run another research iteration").click().run()
     assert "Please describe what should change." in texts(app)
     app.text_area(key="modify_feedback").input("Add cost data")
@@ -221,7 +226,7 @@ def test_modify_disabled_at_iteration_limit() -> None:
     fake = FakeClient(research=session("awaiting_approval", pending_nodes=["human_review"],
                                        approval_request=APPROVAL | {"can_modify": False}))
     app = run_page("research", fake, active_session="s1")
-    button(app, "Modify Research").click().run()
+    button(app, "Request Changes").click().run()
     assert button(app, "Run another research iteration").disabled
     assert "maximum number of times" in texts(app)
 
@@ -238,23 +243,19 @@ def test_completed_report_feels_finished() -> None:
     app, fake = completed_app()
     assert not app.exception
     page = texts(app)
-    assert "Research Complete ✓" in page and "Benefits and Limitations of RAG" in page and "2 cited sources" in page
-    assert "Executive Summary" in page and "RAG grounds answers in retrieved text" in page
-    assert "Key Findings" in page and "Retrieval quality matters" in page
-    assert {"View Report", "Back to History", "New Research"} <= labels(app)
+    assert "Research Complete ✓" in page and "Research Report" in page and "Benefits and Limitations of RAG" in page
+    assert "What are the benefits of RAG?" in page and "Sources <b>2</b>" in page and "Completed" in page
+    assert "Executive Summary" in page and "Body [W1]." in page  # report shown as a document
+    assert not any(m.value.lstrip().startswith("# ") for m in app.markdown)  # title not repeated
+    assert {"View Sources", "Start New Research", "Back to History"} <= labels(app)
     assert app.get("download_button")  # PDF download
     assert fake.called("get_report") and fake.called("get_report_pdf")
 
 
-def test_view_report_and_sources() -> None:
+def test_view_sources() -> None:
     app, _ = completed_app()
-    button(app, "View Report").click().run()
-    assert app.session_state["view:s1"] == "Full report"
-    assert "Body [W1]." in texts(app)
-    assert not any(m.value.lstrip().startswith("# ") for m in app.markdown)  # title not repeated
-
-    app.session_state["view:s1"] = "Sources"
-    app.run()
+    button(app, "View Sources").click().run()
+    assert app.session_state["view:s1:sources"] is True  # opens the collapsible sources section
     page = texts(app)
     assert "RAG survey" in page and "Corroborated" in page and "Single source" in page
     assert "https://example.org/rag" in page
@@ -310,9 +311,9 @@ def test_history_shows_research_cards() -> None:
     page = texts(app)
     assert "Total research" in page and "Waiting for approval" in page
     assert "Report A" in page and "Findings are ready for your review." in page
-    assert "Completed" in page and "Waiting for Approval" in page and "Failed" in page
+    assert "Completed" in page and "Awaiting Review" in page and "Failed" in page
     assert "10 sources" in page and "1 revision" in page
-    assert [b.label for b in app.button].count("Open Research") == 3
+    assert [b.label for b in app.button].count("Open Research →") == 3
 
 
 def test_history_open_and_delete() -> None:
@@ -340,8 +341,9 @@ def test_knowledge_base_document_cards() -> None:
     assert not app.exception
     page = texts(app)
     assert "notes.pdf" in page and "scan.pdf" in page and "Ready" in page and "Needs attention" in page
-    assert "Searchable passages" in page and "7 passages" in page
-    assert "chroma" not in page.lower() and "embedding" not in page.lower()
+    assert "PDF document" in page and "2 documents · 1 ready" in page
+    for internal in ("chroma", "embedding", "chunk", "passage", "vector"):
+        assert internal not in page.lower(), internal
     assert not any(b.key == "proc_d1" for b in app.button)  # only unprocessed docs can be re-processed
     app.button(key="proc_d2").click().run()
     assert fake.called("process_document") == [("process_document", "d2")]
@@ -357,9 +359,9 @@ def test_settings_is_user_facing() -> None:
     app = run_page("settings", fake)
     assert not app.exception
     page = texts(app)
-    for expected in ("AI Model", "Gemini 3.5 Flash", "Knowledge Base", "1 document available to search",
-                     "System Status", "All research features are available", "About ResearchPilot",
-                     "Multi-agent AI research and report generation system.", "Version 1.0"):
+    for expected in ("General", "Research Preferences", "Appearance", "AI model", "Gemini 3.5 Flash",
+                     "1 document available to search", "Operational", "All research features are available",
+                     "Light", "ResearchPilot 1.0"):
         assert expected in page, expected
     for technical in TECHNICAL_TERMS:
         assert technical.lower() not in page.lower(), technical
@@ -395,7 +397,7 @@ def test_full_app_boots_with_navigation_and_status_card() -> None:
     assert not app.exception
     assert "ResearchPilot" in texts(app)
     sidebar = "\n".join(m.value for m in app.sidebar.markdown)
-    assert "System Ready" in sidebar and "AI research workspace is online" in sidebar
+    assert "System Operational" in sidebar
 
 
 def test_full_app_shows_offline_status() -> None:
@@ -426,3 +428,46 @@ def test_user_text_is_escaped_in_html_components() -> None:
     source = source_item_html({"id": "W1", "title": "<b>t</b>", "reference": "javascript:alert(1)",
                                "source_type": "web", "verification_status": "unverified"})
     assert "<b>t</b>" not in source and "href" not in source  # non-http references are not links
+
+
+def test_settings_preferences_persist_and_prefill_the_composer() -> None:
+    def script() -> None:
+        import streamlit as st
+
+        from frontend.views import new_research, settings_page
+
+        (new_research if st.session_state.get("_page") == "research" else settings_page).render()
+
+    app = AppTest.from_function(script, default_timeout=TIMEOUT)
+    app.session_state["api_client"] = FakeClient()
+    app.run()
+    app.text_area(key="_w_pref_default_instructions").input("Prefer peer-reviewed sources")
+    app.toggle(key="_w_pref_show_activity").set_value(False)
+    app.run()
+    app.session_state["_page"] = "research"  # navigate away: settings widgets are no longer rendered
+    app.run()
+    assert app.session_state["pref_default_instructions"] == "Prefer peer-reviewed sources"
+    assert app.session_state["pref_show_activity"] is False
+    assert app.text_area(key="composer_instructions").value == "Prefer peer-reviewed sources"
+
+
+def test_activity_log_can_be_hidden() -> None:
+    def script() -> None:
+        import streamlit as st
+
+        from frontend.views import new_research
+
+        st.session_state["pref_show_activity"] = False
+        new_research.render()
+
+    app = AppTest.from_function(script, default_timeout=TIMEOUT)
+    app.session_state["api_client"] = FakeClient(research=session("running", pending_nodes=["analysis"]))
+    app.session_state["active_session_id"] = "s1"
+    app.run()
+    assert not any("Activity log" in e.label for e in app.expander)
+
+
+def test_compact_layout_changes_the_stylesheet() -> None:
+    from frontend.ui.theme import stylesheet
+
+    assert len(stylesheet(compact=True)) > len(stylesheet()) and "#167D8D" in stylesheet()

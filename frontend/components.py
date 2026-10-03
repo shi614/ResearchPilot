@@ -22,6 +22,11 @@ PAGES_KEY = "_pages"
 
 SystemState = Literal["ready", "limited", "offline"]
 
+# User preferences (Settings page), kept for the browser session.
+PREF_DEFAULT_INSTRUCTIONS = "pref_default_instructions"
+PREF_SHOW_ACTIVITY = "pref_show_activity"
+PREF_COMPACT = "pref_compact"
+
 
 def client() -> ResearchPilotClient:
     if CLIENT_KEY not in st.session_state:

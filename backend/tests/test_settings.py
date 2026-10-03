@@ -43,6 +43,38 @@ def test_api_keys_never_appear_in_repr_or_dump() -> None:
     assert settings.gemini_api_key.get_secret_value() == secret
 
 
+def test_gemini_keys_falls_back_to_single_key_when_pool_unset() -> None:
+    settings = Settings(_env_file=None, gemini_api_key="solo-key")
+    assert settings.gemini_keys == ["solo-key"]
+
+
+def test_gemini_keys_empty_when_nothing_configured() -> None:
+    assert Settings(_env_file=None).gemini_keys == []
+    assert Settings(_env_file=None).missing_required_keys() == ["GEMINI_API_KEY", "TAVILY_API_KEY"]
+
+
+def test_gemini_keys_pool_is_parsed_and_trimmed_and_takes_precedence() -> None:
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="solo-key",
+        gemini_api_keys=" key-one , key-two ,key-three",
+    )
+    assert settings.gemini_keys == ["key-one", "key-two", "key-three"]
+    assert settings.missing_required_keys() == ["TAVILY_API_KEY"]
+
+
+def test_blank_gemini_keys_pool_is_treated_as_unset() -> None:
+    settings = Settings(_env_file=None, gemini_api_key="solo-key", gemini_api_keys="   ")
+    assert settings.gemini_api_keys is None
+    assert settings.gemini_keys == ["solo-key"]
+
+
+def test_gemini_keys_pool_secret_never_appears_in_repr_or_dump() -> None:
+    settings = Settings(_env_file=None, gemini_api_keys="key-one,key-two")
+    assert "key-one" not in repr(settings)
+    assert "key-two" not in settings.model_dump_json()
+
+
 def test_models_prefix_is_stripped() -> None:
     assert Settings(_env_file=None, gemini_model="models/gemini-2.5-flash").gemini_model == (
         "gemini-2.5-flash"

@@ -17,7 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import streamlit as st  # noqa: E402
 
-from frontend.components import PAGES_KEY, system_state  # noqa: E402
+from frontend.components import PAGES_KEY, PREF_COMPACT, system_state  # noqa: E402
 from frontend.ui.components import system_status_card  # noqa: E402
 from frontend.ui.theme import inject_theme  # noqa: E402
 from frontend.views import history, knowledge_base, new_research, settings_page  # noqa: E402
@@ -28,13 +28,13 @@ LOGO_CSS = '<style>[data-testid="stSidebarHeader"] img { height: 3.1rem !importa
 
 def main() -> None:
     st.set_page_config(page_title="ResearchPilot", page_icon=str(ASSETS / "logo_icon.svg"), layout="wide")
-    inject_theme()
+    inject_theme(compact=bool(st.session_state.get(PREF_COMPACT)))
     st.html(LOGO_CSS)
     st.logo(str(ASSETS / "logo.svg"), size="large", icon_image=str(ASSETS / "logo_icon.svg"))
     pages = {
-        "research": st.Page(new_research.render, title="New Research", icon=":material/add_circle:", default=True),
-        "history": st.Page(history.render, title="Research History", icon=":material/history:", url_path="history"),
-        "knowledge": st.Page(knowledge_base.render, title="Knowledge Base", icon=":material/inventory_2:",
+        "research": st.Page(new_research.render, title="New Research", icon=":material/add:", default=True),
+        "history": st.Page(history.render, title="History", icon=":material/history:", url_path="history"),
+        "knowledge": st.Page(knowledge_base.render, title="Knowledge Base", icon=":material/menu_book:",
                              url_path="knowledge-base"),
         "settings": st.Page(settings_page.render, title="Settings", icon=":material/settings:", url_path="settings"),
     }

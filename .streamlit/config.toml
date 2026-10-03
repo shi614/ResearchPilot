@@ -1,22 +1,22 @@
 [theme]
 base = "light"
-primaryColor = "#4f46e5"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f5f6fb"
-textColor = "#1f2a44"
-linkColor = "#4f46e5"
-codeTextColor = "#3b4a63"
-codeBackgroundColor = "#eef2f8"
+primaryColor = "#167D8D"
+backgroundColor = "#F8F7F3"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#172033"
+linkColor = "#167D8D"
+codeTextColor = "#344054"
+codeBackgroundColor = "#F2F2EF"
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
 headingFontSizes = ["2.1rem", "1.45rem", "1.15rem", "1rem", "0.95rem", "0.9rem"]
 headingFontWeights = [700, 650, 600, 600, 600, 600]
-baseRadius = "10px"
-borderColor = "#e4e7f0"
+baseRadius = "8px"
+borderColor = "#E5E7EB"
 showSidebarBorder = true
 
 [theme.sidebar]
-backgroundColor = "#f7f9fc"
-secondaryBackgroundColor = "#eef2f8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8F7F3"
 headingFontSizes = ["1.3rem", "1.1rem", "1rem", "0.95rem", "0.9rem", "0.85rem"]
 
 [client]

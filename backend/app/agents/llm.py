@@ -7,6 +7,9 @@ Free-tier protection lives here, in one place:
   transient errors or a short per-minute 429. Daily-quota 429s fail fast.
 - structured outputs are validated with Pydantic; one repair attempt is made
   if the model returns malformed JSON.
+- optionally, a pool of Gemini keys (GEMINI_API_KEYS) is rotated through: a
+  daily-quota 429 on the current key rotates to the next one and retries,
+  rather than failing the run. With a single key, behaviour is unchanged.
 """
 
 from __future__ import annotations
@@ -68,13 +71,19 @@ def should_retry_llm_error(exc: Exception) -> bool:
 class GeminiLLM:
     def __init__(
         self,
-        chat_model: BaseChatModel,
+        chat_model: BaseChatModel | list[BaseChatModel],
         *,
         max_rpm: int,
         max_attempts: int = 2,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        self._chat = chat_model
+        self._chats: list[BaseChatModel] = (
+            list(chat_model) if isinstance(chat_model, list) else [chat_model]
+        )
+        if not self._chats:
+            raise ValueError("GeminiLLM requires at least one chat model")
+        self._chat_index = 0
+        self._chat = self._chats[0]
         self._limiter = InMemoryRateLimiter(
             requests_per_second=max_rpm / 60, check_every_n_seconds=0.1, max_bucket_size=1
         )
@@ -87,30 +96,66 @@ class GeminiLLM:
     def call_count(self) -> int:
         return self._calls
 
-    def _request(self, fn: Callable[[], Any], operation: str) -> Any:
+    @property
+    def active_key_index(self) -> int:
+        """Index (0-based) of the Gemini key currently in use, for diagnostics."""
+        return self._chat_index
+
+    def _rotate_key(self) -> bool:
+        """Advance to the next configured key. Returns False if none remain."""
+        if self._chat_index + 1 >= len(self._chats):
+            return False
+        self._chat_index += 1
+        self._chat = self._chats[self._chat_index]
+        logger.warning(
+            "Gemini key %d/%d exhausted its daily quota; rotating to key %d/%d",
+            self._chat_index,
+            len(self._chats),
+            self._chat_index + 1,
+            len(self._chats),
+        )
+        return True
+
+    def _request(self, make_call: Callable[[], Any], operation: str) -> Any:
+        """Run `make_call` (which must read `self._chat` fresh, not a captured copy).
+
+        Rotates to the next configured key and retries the whole call when
+        the current key's daily quota is exhausted and another key remains;
+        otherwise behaves exactly as before (single retry on transient
+        errors, fail-fast on a daily-quota 429).
+        """
+
         def counted() -> Any:
             self._limiter.acquire(blocking=True)
             with self._lock:
                 self._calls += 1
-            return fn()
+            return make_call()
 
-        try:
-            return call_with_retry(
-                counted,
-                should_retry=should_retry_llm_error,
-                retry_after=gemini_retry_after,
-                max_attempts=self._max_attempts,
-                sleep=self._sleep,
-                description=f"Gemini {operation}",
-            )
-        except Exception as exc:
-            raise to_service_error(exc, operation) from exc
+        while True:
+            try:
+                return call_with_retry(
+                    counted,
+                    should_retry=should_retry_llm_error,
+                    retry_after=gemini_retry_after,
+                    max_attempts=self._max_attempts,
+                    sleep=self._sleep,
+                    description=f"Gemini {operation}",
+                )
+            except Exception as exc:
+                if is_daily_quota_error(exc) and self._rotate_key():
+                    continue
+                raise to_service_error(exc, operation) from exc
 
     def structured(self, schema: type[M], system: str, user: str, *, operation: str) -> M:
-        runnable = self._chat.with_structured_output(schema, method="json_schema", include_raw=True)
         messages: list[BaseMessage] = [SystemMessage(system), HumanMessage(user)]
         for attempt in (1, 2):
-            raw = self._request(lambda: runnable.invoke(messages), operation)
+            def call_once(messages: list[BaseMessage] = messages, schema: type[M] = schema) -> Any:
+                runnable = self._chat.with_structured_output(
+                    schema, method="json_schema", include_raw=True
+                )
+                return runnable.invoke(messages)
+
+            raw = self._request(call_once, operation)
             parsed = raw.get("parsed") if isinstance(raw, dict) else None
             if isinstance(parsed, schema):
                 return parsed
@@ -128,21 +173,28 @@ class GeminiLLM:
     def invoke_with_tools(
         self, messages: list[BaseMessage], tools: list[BaseTool], *, operation: str
     ) -> AIMessage:
-        bound = self._chat.bind_tools(tools)
-        result = self._request(lambda: bound.invoke(messages), operation)
+        def call_once() -> Any:
+            bound = self._chat.bind_tools(tools)
+            return bound.invoke(messages)
+
+        result = self._request(call_once, operation)
         if not isinstance(result, AIMessage):
             raise MalformedResponseError("Gemini", f"{operation} returned an unexpected message type.")
         return result
 
 
 def create_llm(settings: Settings) -> GeminiLLM:
-    if settings.gemini_api_key is None:
+    keys = settings.gemini_keys
+    if not keys:
         raise ConfigurationError("GEMINI_API_KEY is not set; the research agents are unavailable.")
-    chat = ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.gemini_api_key,
-        temperature=settings.gemini_temperature,
-        timeout=settings.llm_timeout_seconds,
-        max_retries=1,  # 1 = no SDK retries (0 means "SDK default of 5"); we retry ourselves
-    )
-    return GeminiLLM(chat, max_rpm=settings.gemini_max_rpm)
+    chats = [
+        ChatGoogleGenerativeAI(
+            model=settings.gemini_model,
+            google_api_key=key,
+            temperature=settings.gemini_temperature,
+            timeout=settings.llm_timeout_seconds,
+            max_retries=1,  # 1 = no SDK retries (0 means "SDK default of 5"); we retry ourselves
+        )
+        for key in keys
+    ]
+    return GeminiLLM(chats, max_rpm=settings.gemini_max_rpm)

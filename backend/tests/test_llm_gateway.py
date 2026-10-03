@@ -59,6 +59,14 @@ def gateway(outputs: list[Any]) -> tuple[GeminiLLM, FakeChat, list[float]]:
     return GeminiLLM(chat, max_rpm=6000, sleep=sleeps.append), chat, sleeps  # type: ignore[arg-type]
 
 
+def gateway_pool(outputs_per_key: list[list[Any]]) -> tuple[GeminiLLM, list[FakeChat], list[float]]:
+    """Like `gateway`, but backed by a pool of keys (one FakeChat per key)."""
+    chats = [FakeChat(outputs) for outputs in outputs_per_key]
+    sleeps: list[float] = []
+    llm = GeminiLLM(chats, max_rpm=6000, sleep=sleeps.append)  # type: ignore[arg-type]
+    return llm, chats, sleeps
+
+
 def test_structured_output_uses_json_schema_and_counts_calls() -> None:
     llm, chat, _ = gateway([{"parsed": Answer(text="hi"), "parsing_error": None}])
     assert llm.structured(Answer, "sys", "user", operation="test").text == "hi"
@@ -121,3 +129,43 @@ def test_create_llm_requires_key_and_disables_sdk_retries() -> None:
     llm = create_llm(Settings(_env_file=None, gemini_api_key="test-key", gemini_model="gemini-3.5-flash"))
     chat = llm._chat  # noqa: SLF001
     assert chat.model.endswith("gemini-3.5-flash") and chat.max_retries == 1  # type: ignore[attr-defined]
+
+
+def test_create_llm_builds_one_chat_per_rotation_key() -> None:
+    llm = create_llm(
+        Settings(_env_file=None, gemini_api_keys="key-a,key-b,key-c", gemini_model="gemini-3.5-flash")
+    )
+    assert len(llm._chats) == 3  # noqa: SLF001
+    assert llm.active_key_index == 0
+
+
+def test_daily_quota_rotates_to_next_key_and_succeeds() -> None:
+    llm, chats, sleeps = gateway_pool([
+        [quota(per_day=True, retry_delay="20s")],
+        [{"parsed": Answer(text="from key 2"), "parsing_error": None}],
+    ])
+    assert llm.structured(Answer, "sys", "user", operation="test").text == "from key 2"
+    # One failed attempt on key 1, one successful attempt on key 2; no sleeping -
+    # a daily-quota 429 rotates instead of waiting.
+    assert llm.call_count == 2 and sleeps == []
+    assert llm.active_key_index == 1
+    assert chats[1].runnable.inputs  # the second key actually received the request
+
+
+def test_daily_quota_raises_only_after_every_key_is_exhausted() -> None:
+    exhausted = quota(per_day=True, retry_delay="20s")
+    llm, _, sleeps = gateway_pool([[exhausted], [exhausted], [exhausted]])
+    with pytest.raises(RateLimitError, match="DAILY"):
+        llm.structured(Answer, "sys", "user", operation="test")
+    assert llm.call_count == 3 and sleeps == []
+    assert llm.active_key_index == 2
+
+
+def test_single_key_daily_quota_behaviour_is_unchanged_by_rotation_support() -> None:
+    """A single-key deployment (the common case) must still fail fast, exactly as before."""
+    llm, chat, sleeps = gateway([quota(per_day=True, retry_delay="20s")])
+    with pytest.raises(RateLimitError, match="DAILY"):
+        llm.structured(Answer, "sys", "user", operation="test")
+    assert llm.call_count == 1 and sleeps == []
+    assert llm.active_key_index == 0
+    assert chat is llm._chat  # noqa: SLF001
